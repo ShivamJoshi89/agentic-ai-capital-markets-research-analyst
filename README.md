@@ -212,8 +212,7 @@ MIT License - see LICENSE file for details
 
 ## Contact
 
-[Your Name] - [Your Email] - [GitHub Profile]
-
+Shivam Joshi - joshishivam047@gmail.com 
 ## Acknowledgments
 
 - yfinance for financial data
