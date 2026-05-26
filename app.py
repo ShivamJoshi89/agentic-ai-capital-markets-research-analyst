@@ -1,6 +1,6 @@
 """
 Agentic AI Capital Markets Research Analyst
-Main Streamlit application
+Main Streamlit application - Phase 3
 """
 
 import streamlit as st
@@ -13,6 +13,8 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from agents.market_data_agent import MarketDataAgent
 from agents.fundamentals_agent import FinancialsAgent
+from agents.news_agent import NewsAgent
+from agents.macro_agent import MacroAgent
 from data_sources.yfinance_client import YFinanceClient
 from utils.helpers import validate_ticker, format_currency, format_percentage
 from utils.logger import setup_logger
@@ -52,6 +54,25 @@ st.markdown("""
         border-radius: 0.5rem;
         border-left: 4px solid #dc3545;
     }
+    .news-article {
+        background-color: #f8f9fa;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin: 0.5rem 0;
+        border-left: 4px solid #007bff;
+    }
+    .sentiment-positive {
+        color: #28a745;
+        font-weight: bold;
+    }
+    .sentiment-neutral {
+        color: #ffc107;
+        font-weight: bold;
+    }
+    .sentiment-negative {
+        color: #dc3545;
+        font-weight: bold;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -65,6 +86,10 @@ if "fundamentals_data" not in st.session_state:
     st.session_state.fundamentals_data = None
 if "company_info" not in st.session_state:
     st.session_state.company_info = None
+if "news_data" not in st.session_state:
+    st.session_state.news_data = None
+if "macro_data" not in st.session_state:
+    st.session_state.macro_data = None
 
 
 def format_large_number(value):
@@ -85,7 +110,7 @@ def format_large_number(value):
 
 
 def fetch_analysis(ticker: str):
-    """Fetch market and fundamentals data for ticker"""
+    """Fetch market, fundamentals, news, and macro data for ticker"""
     
     ticker = ticker.upper().strip()
     
@@ -95,7 +120,7 @@ def fetch_analysis(ticker: str):
         return False
     
     try:
-        with st.spinner(f"🔄 Fetching data for {ticker}..."):
+        with st.spinner(f"🔄 Fetching comprehensive analysis for {ticker}..."):
             # Fetch company info
             yfinance_client = YFinanceClient()
             company_info = yfinance_client.get_company_info(ticker)
@@ -121,11 +146,31 @@ def fetch_analysis(ticker: str):
             if not fundamentals_data.get("success"):
                 st.warning(f"⚠️ Some fundamentals data unavailable for {ticker}")
             
+            # Fetch news
+            news_agent = NewsAgent()
+            company_name = company_info.get("company_name", ticker)
+            news_data = news_agent.run(ticker, company_name)
+            
+            if not news_data.get("success"):
+                st.warning(f"⚠️ Could not fetch news for {ticker}")
+                news_data = {"success": False, "articles": []}
+            
+            # Fetch macro data
+            macro_agent = MacroAgent()
+            sector = company_info.get("sector", None)
+            macro_data = macro_agent.run(ticker=ticker, sector=sector)
+            
+            if not macro_data.get("success"):
+                st.warning(f"⚠️ Could not fetch macro data")
+                macro_data = {"success": False}
+            
             # Store in session state
             st.session_state.ticker = ticker
             st.session_state.market_data = market_data
             st.session_state.fundamentals_data = fundamentals_data
             st.session_state.company_info = company_info
+            st.session_state.news_data = news_data
+            st.session_state.macro_data = macro_data
             
             return True
     
@@ -449,6 +494,138 @@ def show_fundamentals():
         st.metric("Quick Ratio", fundamentals.get("quick_ratio", "N/A"))
 
 
+def show_news_sentiment():
+    """Display news and sentiment page"""
+    
+    if not st.session_state.news_data or not st.session_state.news_data.get("success"):
+        st.info("📰 News data not available for this ticker. Sentiment analysis coming soon.")
+        return
+    
+    ticker = st.session_state.ticker
+    news_data = st.session_state.news_data
+    
+    st.title(f"📰 News & Sentiment - {ticker}")
+    
+    # Overall sentiment
+    overall_sentiment = news_data.get("overall_sentiment", "Neutral")
+    sentiment_counts = news_data.get("sentiment_counts", {})
+    total_articles = news_data.get("total_articles", 0)
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        sentiment_color = "green" if overall_sentiment == "Positive" else "orange" if overall_sentiment == "Neutral" else "red"
+        st.metric("Overall Sentiment", overall_sentiment)
+    
+    with col2:
+        st.metric("Positive Articles", sentiment_counts.get("positive", 0))
+    
+    with col3:
+        st.metric("Neutral Articles", sentiment_counts.get("neutral", 0))
+    
+    with col4:
+        st.metric("Negative Articles", sentiment_counts.get("negative", 0))
+    
+    st.markdown("---")
+    
+    # Articles
+    st.subheader(f"📋 Recent Headlines ({total_articles} articles)")
+    
+    articles = news_data.get("articles", [])
+    
+    if not articles:
+        st.info("No recent articles found for this ticker.")
+    else:
+        for idx, article in enumerate(articles, 1):
+            sentiment = article.get("sentiment", "Neutral")
+            
+            # Sentiment badge color
+            if sentiment == "Positive":
+                sentiment_class = "✅"
+            elif sentiment == "Negative":
+                sentiment_class = "❌"
+            else:
+                sentiment_class = "⚪"
+            
+            with st.container():
+                col1, col2 = st.columns([0.1, 0.9])
+                
+                with col1:
+                    st.write(sentiment_class)
+                
+                with col2:
+                    st.markdown(f"**{article.get('title', 'N/A')}**")
+                    st.caption(f"📅 {article.get('published_date', 'N/A')} | 📰 {article.get('source', 'N/A')}")
+                    st.write(article.get("description", "")[:200] + "...")
+                    st.markdown(f"[Read More →]({article.get('url', '#')})")
+                
+                st.markdown("---")
+
+
+def show_macro_environment():
+    """Display macroeconomic environment page"""
+    
+    if not st.session_state.macro_data or not st.session_state.macro_data.get("success"):
+        st.info("🌍 Macroeconomic data temporarily unavailable. Check back soon.")
+        return
+    
+    ticker = st.session_state.ticker
+    macro_data = st.session_state.macro_data
+    indicators = macro_data.get("indicators", {})
+    analysis = macro_data.get("analysis", {})
+    
+    st.title(f"🌍 Macroeconomic Environment - {ticker}")
+    
+    # Current indicators
+    st.subheader("📊 Key Economic Indicators")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Federal Funds Rate", indicators.get("fed_rate", "N/A"))
+    
+    with col2:
+        st.metric("10-Year Treasury Yield", indicators.get("10y_treasury", "N/A"))
+    
+    with col3:
+        st.metric("Inflation (CPI)", indicators.get("cpi_inflation", "N/A"))
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.metric("Unemployment Rate", indicators.get("unemployment_rate", "N/A"))
+    
+    with col2:
+        st.metric("VIX Index", indicators.get("vix_index", "N/A"))
+    
+    st.markdown("---")
+    
+    # Analysis
+    st.subheader("💡 Macro Analysis & Impact")
+    
+    if analysis:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("**Interest Rate Environment**")
+            st.info(analysis.get("interest_rates", "N/A"))
+            
+            st.write("**Treasury Yields**")
+            st.info(analysis.get("treasury_impact", "N/A"))
+        
+        with col2:
+            st.write("**Inflation Outlook**")
+            st.info(analysis.get("inflation_impact", "N/A"))
+            
+            st.write("**Labor Market**")
+            st.info(analysis.get("labor_market", "N/A"))
+        
+        st.markdown("---")
+        
+        st.write("**Overall Macro Summary**")
+        st.success(analysis.get("summary", "N/A"))
+
+
 def show_research_memo():
     """Display research memo page"""
     
@@ -463,24 +640,36 @@ def show_research_memo():
     st.markdown(f"""
         ### Agentic AI Research Memo: {ticker}
         
-        **Phase 2 Status:** Core agents implemented ✅
+        **Phase 3 Status:** Market, Fundamentals, News, and Macro agents implemented ✅
         - Market Data Agent: Collecting price data, returns, volatility
         - Financial Fundamentals Agent: Analyzing balance sheet and ratios
-        
-        **Coming in Phase 3:**
         - News Agent: Sentiment analysis and headlines
-        - Macro Agent: Economic indicators
-        - Risk Agent: Risk identification
-        - Report Generation: Full analyst memo
+        - Macro Agent: Economic indicators and context
+        
+        **Coming in Phase 4:**
+        - Risk Agent: Risk identification and scoring
+        - Report Generation: Full analyst memo with bull/base/bear cases
+        - Critic Agent: Output validation and quality checks
         
         ---
         
-        Analyze a ticker to see detailed financial data across these pages:
-        1. **Company Overview** - Basic company information
-        2. **Market Performance** - Stock price, returns, volatility, charts
-        3. **Fundamentals** - Revenue, margins, ratios, balance sheet
+        ### Data Available for {ticker}:
         
-        Next phases will add news, macro context, risks, and the final investment memo.
+        ✅ **Market Data** - Stock prices, returns, volatility, moving averages
+        ✅ **Company Fundamentals** - Revenue, margins, ratios, balance sheet
+        ✅ **News & Sentiment** - Recent headlines with sentiment classification
+        ✅ **Macro Context** - Interest rates, inflation, unemployment, Treasury yields
+        
+        **Next Steps:**
+        Navigate to each dashboard page to view:
+        1. **Company Overview** - Basic company information
+        2. **Market Performance** - Stock price trends and technical metrics
+        3. **Fundamentals** - Financial statements and ratios
+        4. **News & Sentiment** - Recent articles with sentiment analysis
+        5. **Macro Environment** - Economic indicators and impact analysis
+        
+        Phase 4 will synthesize all this data into a final investment research memo with 
+        risk analysis, bull/base/bear case scenarios, and final recommendations.
         """)
 
 
@@ -497,7 +686,7 @@ def show_about():
         This project demonstrates how AI agents can automate financial research workflows
         to support investment decision-making.
         
-        ### Current Capabilities (Phase 2)
+        ### Current Capabilities (Phase 3)
         
         ✅ **Market Data Analysis**
         - Historical stock prices from yfinance
@@ -514,6 +703,20 @@ def show_about():
         - Valuation metrics (P/E, P/B, EPS, Dividend Yield)
         - Leverage ratios (Debt-to-Equity, Current Ratio)
         
+        ✅ **News & Sentiment**
+        - Real-time news articles from multiple sources
+        - Automatic sentiment classification (Positive, Neutral, Negative)
+        - Sentiment distribution analysis
+        - Article summaries and source attribution
+        
+        ✅ **Macroeconomic Context**
+        - Federal Funds Rate
+        - Treasury yields (10-year)
+        - Inflation (CPI) data
+        - Unemployment rate
+        - VIX volatility index
+        - Macro impact analysis on sectors
+        
         ✅ **Company Overview**
         - Company name and sector
         - Market capitalization
@@ -525,8 +728,8 @@ def show_about():
         
         **Phase 1:** ✅ Project skeleton and setup
         **Phase 2:** ✅ Market data & fundamentals agents
-        **Phase 3:** 🔄 News, macro, risk agents
-        **Phase 4:** 🔄 Report generation and final memo
+        **Phase 3:** ✅ News, macro agents, and dashboard pages
+        **Phase 4:** 🔄 Risk agent, report generation, final memo
         **Phase 5:** 🔄 Testing, deployment, refinement
         
         ### Technology Stack
@@ -534,9 +737,21 @@ def show_about():
         - **Framework:** Streamlit (web app)
         - **Data Processing:** Pandas, NumPy
         - **Financial Data:** yfinance
+        - **News Data:** feedparser (Google News RSS)
         - **Visualization:** Plotly
         - **Language:** Python 3.12
         - **LLM:** OpenAI API (for future phases)
+        
+        ### Core Agents
+        
+        1. **Market Data Agent** - Stock prices, returns, volatility
+        2. **Fundamentals Agent** - Balance sheet, ratios, profitability
+        3. **News Agent** - Headlines, sentiment analysis
+        4. **Macro Agent** - Economic indicators, macro impact
+        5. **Risk Agent** - Risk identification (Phase 4)
+        6. **Report Agent** - Final memo generation (Phase 4)
+        7. **SEC Agent** - Filing analysis (Future)
+        8. **Critic Agent** - Quality validation (Phase 4)
         
         ### Not a Prediction Tool
         
@@ -562,7 +777,16 @@ def main():
         st.title("🤖 AI Analyst")
         page = st.radio(
             "Navigation",
-            ["Home", "Company Overview", "Market Performance", "Fundamentals", "Research Memo", "About"]
+            [
+                "Home",
+                "Company Overview",
+                "Market Performance",
+                "Fundamentals",
+                "News & Sentiment",
+                "Macro Environment",
+                "Research Memo",
+                "About"
+            ]
         )
     
     # Main content
@@ -574,6 +798,10 @@ def main():
         show_market_performance()
     elif page == "Fundamentals":
         show_fundamentals()
+    elif page == "News & Sentiment":
+        show_news_sentiment()
+    elif page == "Macro Environment":
+        show_macro_environment()
     elif page == "Research Memo":
         show_research_memo()
     else:  # About

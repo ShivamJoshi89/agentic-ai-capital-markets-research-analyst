@@ -4,6 +4,9 @@ News client for fetching company news and articles
 
 import logging
 from typing import Dict, Any, List, Optional
+import feedparser
+import requests
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +14,7 @@ logger = logging.getLogger(__name__)
 class NewsClient:
     """
     Client for fetching news articles related to companies.
+    Uses Google News RSS as a free fallback.
     """
     
     def __init__(self):
@@ -20,7 +24,7 @@ class NewsClient:
     
     def get_news(self, ticker: str, company_name: str, limit: int = 10) -> Optional[List[Dict[str, Any]]]:
         """
-        Fetch recent news articles.
+        Fetch recent news articles using Google News RSS.
         
         Args:
             ticker: Stock ticker symbol
@@ -28,9 +32,77 @@ class NewsClient:
             limit: Number of articles to fetch
         
         Returns:
-            List of news articles or None if error
+            List of news articles or empty list if error
         """
-        logger.info(f"Fetching news for {ticker} ({company_name}), limit={limit}")
+        try:
+            logger.info(f"Fetching news for {ticker} ({company_name}), limit={limit}")
+            
+            # Use Google News RSS feed for company name
+            # This is a free alternative to NewsAPI
+            search_query = f'"{company_name}" OR {ticker}'
+            rss_url = f"https://news.google.com/rss/search?q={search_query}&hl=en-US&gl=US&ceid=US:en"
+            
+            articles = []
+            
+            try:
+                feed = feedparser.parse(rss_url)
+                
+                for entry in feed.entries[:limit]:
+                    article = {
+                        "title": entry.get("title", ""),
+                        "description": entry.get("summary", ""),
+                        "source": entry.get("source", {}).get("title", "Google News"),
+                        "url": entry.get("link", ""),
+                        "published_date": entry.get("published", ""),
+                        "ticker": ticker
+                    }
+                    articles.append(article)
+                
+                logger.info(f"Successfully fetched {len(articles)} articles for {ticker}")
+                return articles
+            
+            except Exception as e:
+                logger.warning(f"Error fetching from Google News: {str(e)}")
+                return []
         
-        # Placeholder: Implemented in Phase 2
-        return None
+        except Exception as e:
+            logger.error(f"Error in get_news: {str(e)}")
+            return []
+    
+    @staticmethod
+    def get_sentiment_label(text: str) -> str:
+        """
+        Simple sentiment classification based on keywords.
+        
+        Args:
+            text: Text to analyze
+        
+        Returns:
+            Sentiment label: 'Positive', 'Neutral', or 'Negative'
+        """
+        if not text:
+            return "Neutral"
+        
+        text_lower = text.lower()
+        
+        positive_keywords = [
+            "bullish", "surge", "rally", "jump", "soar", "gain", "beat",
+            "profit", "growth", "strong", "rose", "outperform", "upgrade",
+            "buy", "positive", "success", "record", "high", "recover"
+        ]
+        
+        negative_keywords = [
+            "bearish", "plunge", "crash", "fall", "decline", "loss", "miss",
+            "weakness", "weak", "drop", "cut", "downgrade", "sell", "negative",
+            "concern", "risk", "slump", "volatile", "loss", "down"
+        ]
+        
+        positive_count = sum(1 for word in positive_keywords if word in text_lower)
+        negative_count = sum(1 for word in negative_keywords if word in text_lower)
+        
+        if positive_count > negative_count:
+            return "Positive"
+        elif negative_count > positive_count:
+            return "Negative"
+        else:
+            return "Neutral"
