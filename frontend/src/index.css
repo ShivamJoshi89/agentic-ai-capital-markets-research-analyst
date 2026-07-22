@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  background-color: #0a0e1a;
+}
+
+body {
+  @apply bg-navy-900 text-white font-sans antialiased;
+}
+
+/* Subtle dark scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #0d1224;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e2d4a;
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2a3d61;
+}
