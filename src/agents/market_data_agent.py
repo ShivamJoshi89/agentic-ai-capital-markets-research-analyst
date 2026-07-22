@@ -125,11 +125,11 @@ class MarketDataAgent:
                 "three_month_return": round(three_month_return, 2),
                 "six_month_return": round(six_month_return, 2),
                 "ytd_return": round(ytd_return, 2),
-                "volatility": round(volatility, 2) if volatility else None,
+                "volatility": round(volatility * 100, 2) if volatility else None,
                 "ma_20": round(ma_20.iloc[-1], 2) if not pd.isna(ma_20.iloc[-1]) else None,
                 "ma_50": round(ma_50.iloc[-1], 2) if not pd.isna(ma_50.iloc[-1]) else None,
                 "ma_200": round(ma_200.iloc[-1], 2) if not pd.isna(ma_200.iloc[-1]) else None,
-                "max_drawdown": round(max_drawdown, 2) if max_drawdown else None,
+                "max_drawdown": round(max_drawdown * 100, 2) if max_drawdown else None,
                 "avg_volume": int(avg_volume),
                 "latest_volume": int(history["Volume"].iloc[-1])
             }

@@ -76,8 +76,8 @@ class FinancialsAgent:
     
     def _format_fundamentals(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Format fundamentals for display"""
-        
-        return {
+
+        formatted = {
             # Income Statement
             "revenue": self._format_number(data.get("revenue")),
             "net_income": self._format_number(data.get("net_income")),
@@ -102,13 +102,28 @@ class FinancialsAgent:
             "eps": self._format_number(data.get("eps"), decimals=2),
             "pe_ratio": self._format_number(data.get("pe_ratio"), decimals=2),
             "pb_ratio": self._format_number(data.get("pb_ratio"), decimals=2),
-            "dividend_yield": self._format_percentage(data.get("dividend_yield")),
-            
+            "dividend_yield": self._format_dividend_yield(data.get("dividend_yield")),
+
             # Leverage
             "debt_to_equity": self._format_number(data.get("debt_to_equity"), decimals=2),
             "current_ratio": self._format_number(data.get("current_ratio"), decimals=2),
             "quick_ratio": self._format_number(data.get("quick_ratio"), decimals=2),
         }
+
+        # yfinance leaves several standard metrics empty for financial-sector
+        # companies (banks measure leverage via regulatory capital, and FCF is
+        # distorted by lending flows) - explain instead of showing bare N/A
+        if data.get("sector") == "Financial Services":
+            if data.get("debt_to_equity") is None:
+                formatted["debt_to_equity"] = (
+                    "N/A - D/E ratio uses different leverage metrics for financial institutions"
+                )
+            if data.get("free_cash_flow") is None:
+                formatted["free_cash_flow"] = (
+                    "N/A - FCF is not a standard metric for financial institutions"
+                )
+
+        return formatted
     
     @staticmethod
     def _format_number(value, decimals=0):
@@ -133,6 +148,23 @@ class FinancialsAgent:
         try:
             if isinstance(value, (int, float)):
                 return f"{value*100:.2f}%"
+        except:
+            return "N/A"
+        return "N/A"
+
+    @staticmethod
+    def _format_dividend_yield(value):
+        """Format dividend yield for display.
+
+        Unlike margins/ROE (returned as fractions), yfinance >= 0.2.54 returns
+        dividendYield already expressed in percent (e.g. 1.74 for 1.74%),
+        so no x100 scaling is applied here.
+        """
+        if value is None:
+            return "N/A"
+        try:
+            if isinstance(value, (int, float)):
+                return f"{value:.2f}%"
         except:
             return "N/A"
         return "N/A"

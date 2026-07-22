@@ -190,15 +190,15 @@ class RiskAgent:
                     "impact": "Could see sharp 15-20%+ drawdowns during market corrections"
                 })
             
-            # Large recent drawdown
+            # Large recent drawdown (max_drawdown is expressed in percent, e.g. -15.2)
             max_dd = metrics.get("max_drawdown", 0)
-            if max_dd and max_dd < -0.25:
+            if max_dd and max_dd < -25:
                 risks.append({
                     "title": "Significant Recent Drawdown",
                     "category": "Market",
                     "severity": "High",
-                    "description": f"Stock experienced {abs(max_dd)*100:.1f}% peak-to-trough drawdown within past year. Suggests either sector weakness or company-specific deterioration. May indicate elevated vulnerability to further downside.",
-                    "metric": f"{max_dd*100:.1f}%",
+                    "description": f"Stock experienced {abs(max_dd):.1f}% peak-to-trough drawdown within past year. Suggests either sector weakness or company-specific deterioration. May indicate elevated vulnerability to further downside.",
+                    "metric": f"{max_dd:.1f}%",
                     "impact": "Risk of additional 10-15% downside if momentum reverses"
                 })
         

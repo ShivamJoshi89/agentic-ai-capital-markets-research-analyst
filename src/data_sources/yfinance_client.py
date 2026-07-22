@@ -126,6 +126,7 @@ class YFinanceClient:
             
             fundamentals = {
                 "ticker": ticker,
+                "sector": info.get("sector", None),
                 "revenue": info.get("totalRevenue", None),
                 "net_income": info.get("netIncomeToCommon", None),
                 "total_assets": info.get("totalAssets", None),
