@@ -208,15 +208,15 @@ Avoid making definitive buy/sell recommendations - focus on analysis and risks.
 """
         
         try:
-            response = self.client.messages.create(
+            response = self.client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 max_tokens=2000,
                 messages=[
                     {"role": "user", "content": prompt}
                 ]
             )
-            
-            return response.content[0].text
+
+            return response.choices[0].message.content
         
         except Exception as e:
             logger.error(f"OpenAI API error: {str(e)}")

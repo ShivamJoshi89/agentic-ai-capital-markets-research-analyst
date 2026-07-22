@@ -4,6 +4,7 @@ News client for fetching company news and articles
 
 import logging
 from typing import Dict, Any, List, Optional
+from urllib.parse import urlencode
 import feedparser
 import requests
 from datetime import datetime
@@ -40,7 +41,13 @@ class NewsClient:
             # Use Google News RSS feed for company name
             # This is a free alternative to NewsAPI
             search_query = f'"{company_name}" OR {ticker}'
-            rss_url = f"https://news.google.com/rss/search?q={search_query}&hl=en-US&gl=US&ceid=US:en"
+            query_params = urlencode({
+                "q": search_query,
+                "hl": "en-US",
+                "gl": "US",
+                "ceid": "US:en"
+            })
+            rss_url = f"https://news.google.com/rss/search?{query_params}"
             
             articles = []
             
