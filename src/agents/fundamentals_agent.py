@@ -105,23 +105,20 @@ class FinancialsAgent:
             "dividend_yield": self._format_dividend_yield(data.get("dividend_yield")),
 
             # Leverage
-            "debt_to_equity": self._format_number(data.get("debt_to_equity"), decimals=2),
+            "debt_to_equity": self._format_debt_to_equity(data.get("debt_to_equity")),
             "current_ratio": self._format_number(data.get("current_ratio"), decimals=2),
             "quick_ratio": self._format_number(data.get("quick_ratio"), decimals=2),
+
+            "sector": data.get("sector"),
+            "is_financial_sector": data.get("sector") == "Financial Services",
         }
 
-        # yfinance leaves several standard metrics empty for financial-sector
-        # companies (banks measure leverage via regulatory capital, and FCF is
-        # distorted by lending flows) - explain instead of showing bare N/A
-        if data.get("sector") == "Financial Services":
-            if data.get("debt_to_equity") is None:
-                formatted["debt_to_equity"] = (
-                    "N/A - D/E ratio uses different leverage metrics for financial institutions"
-                )
-            if data.get("free_cash_flow") is None:
-                formatted["free_cash_flow"] = (
-                    "N/A - FCF is not a standard metric for financial institutions"
-                )
+        # Metrics that are structurally absent for banks (no current/non-current
+        # balance-sheet split, no reported gross profit). The UI renders the
+        # explanation as an info box via is_financial_sector.
+        if formatted["is_financial_sector"]:
+            if not data.get("gross_margin"):
+                formatted["gross_margin"] = "N/A"
 
         return formatted
     
@@ -148,6 +145,22 @@ class FinancialsAgent:
         try:
             if isinstance(value, (int, float)):
                 return f"{value*100:.2f}%"
+        except:
+            return "N/A"
+        return "N/A"
+
+    @staticmethod
+    def _format_debt_to_equity(value):
+        """Format debt-to-equity as a multiple.
+
+        yfinance's debtToEquity (and our statement-computed fallback) is
+        percent-scaled: 154.0 means debt is 1.54x equity.
+        """
+        if value is None:
+            return "N/A"
+        try:
+            if isinstance(value, (int, float)):
+                return f"{value / 100:.2f}x"
         except:
             return "N/A"
         return "N/A"

@@ -824,13 +824,24 @@ def show_fundamentals():
     # Leverage
     st.subheader("⚖️ Leverage & Liquidity")
     col1, col2, col3 = st.columns(3)
-    
+
     with col1:
         st.metric("Debt-to-Equity", fundamentals.get("debt_to_equity", "N/A"))
     with col2:
         st.metric("Current Ratio", fundamentals.get("current_ratio", "N/A"))
     with col3:
         st.metric("Quick Ratio", fundamentals.get("quick_ratio", "N/A"))
+
+    if fundamentals.get("is_financial_sector"):
+        st.info(
+            "ℹ️ **Financial institution note:** balance-sheet totals and D/E are drawn from "
+            "reported statements (D/E = total debt ÷ stockholders' equity). Current and quick "
+            "ratios are not reported by banks — their balance sheets have no current/non-current "
+            "split — and gross margin is not a reported bank metric. Bank leverage is formally "
+            "assessed via regulatory capital (e.g., Tier 1 ratio) rather than simple D/E. "
+            "Operating/free cash flow for banks is dominated by lending and deposit flows and is "
+            "routinely large and negative — it is not comparable to industrial-company FCF."
+        )
 
 
 def show_peer_comparison():
