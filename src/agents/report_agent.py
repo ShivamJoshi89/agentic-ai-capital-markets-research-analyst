@@ -53,7 +53,8 @@ class ReportAgent:
             analysis_context = self._prepare_context(ticker, all_agent_outputs)
             
             # Generate memo using OpenAI
-            memo = self._generate_memo_with_llm(ticker, analysis_context)
+            company_name = all_agent_outputs.get("company_info", {}).get("company_name", ticker)
+            memo = self._generate_memo_with_llm(ticker, analysis_context, company_name)
             
             return {
                 "ticker": ticker,
@@ -144,10 +145,52 @@ COMPANY SUMMARY
         
         return formatted
     
-    def _generate_memo_with_llm(self, ticker: str, context: str) -> str:
-        """Generate memo using OpenAI"""
-        
-        prompt = f"""You are a professional investment analyst. Based on the following research data, 
+    PROMPT_TEMPLATE_PATH = Path(__file__).parent.parent / "prompts" / "research_memo_prompt.txt"
+
+    def _load_prompt_template(self) -> str:
+        """Load the memo prompt template, or None if unavailable"""
+        try:
+            return self.PROMPT_TEMPLATE_PATH.read_text(encoding="utf-8")
+        except OSError as e:
+            logger.warning(f"Could not load research_memo_prompt.txt ({e}), using built-in prompt")
+            return None
+
+    def _generate_memo_with_llm(self, ticker: str, context: str, company_name: str = "") -> str:
+        """Generate memo using OpenAI, driven by the prompt template file"""
+
+        template = self._load_prompt_template()
+        if template:
+            # .replace() rather than .format() so literal braces in the
+            # template can never raise KeyError
+            prompt = (
+                template
+                .replace("{ticker}", ticker)
+                .replace("{company_name}", company_name or ticker)
+                .replace("{analysis_context}", context)
+            )
+        else:
+            prompt = self._build_fallback_prompt(ticker, context)
+
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                max_tokens=2000,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+
+            return response.choices[0].message.content
+
+        except Exception as e:
+            logger.error(f"OpenAI API error: {str(e)}")
+            raise
+
+    @staticmethod
+    def _build_fallback_prompt(ticker: str, context: str) -> str:
+        """Built-in prompt used only if the template file is missing"""
+
+        return f"""You are a professional investment analyst. Based on the following research data,
 write a comprehensive investment research memo for {ticker}.
 
 {context}
@@ -206,22 +249,7 @@ Generate a professional investment memo with the following sections:
 Write in professional analyst style. Be balanced and data-driven. Include specific numbers and metrics.
 Avoid making definitive buy/sell recommendations - focus on analysis and risks.
 """
-        
-        try:
-            response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                max_tokens=2000,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
-            )
 
-            return response.choices[0].message.content
-        
-        except Exception as e:
-            logger.error(f"OpenAI API error: {str(e)}")
-            raise
-    
     def _generate_fallback_memo(self, ticker: str, all_outputs: Dict[str, Any]) -> str:
         """Generate fallback memo if LLM fails"""
         

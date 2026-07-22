@@ -5,7 +5,10 @@ using the data provided below.
 ANALYSIS CONTEXT:
 {analysis_context}
 
-Follow sell-side research methodology throughout. Structure the memo as follows:
+Follow sell-side research methodology throughout. Structure the memo EXACTLY as
+numbered below: reproduce every numbered section header verbatim as its own
+ALL-CAPS line (e.g. "10. KEY ASSUMPTIONS & EXTERNAL RISK FACTORS"), followed by
+that section's content. Do not skip, merge, or rename sections.
 
 1. EXECUTIVE SUMMARY
    - Investment thesis in 3-4 sentences
@@ -55,11 +58,25 @@ Follow sell-side research methodology throughout. Structure the memo as follows:
      macro deterioration
    - What has to go wrong, and the implied downside
 
-10. INVESTMENT RECOMMENDATION
+10. KEY ASSUMPTIONS & EXTERNAL RISK FACTORS
+    - Macroeconomic assumptions underpinning the analysis: state explicitly the
+      interest rate path, inflation trajectory, unemployment/growth backdrop, and
+      market volatility regime the thesis assumes (drawn from the macro data in
+      the context)
+    - Thesis-invalidating events: identify the specific events that would
+      invalidate this thesis, including a material earnings surprise (beat or
+      miss vs. expectations), adverse regulatory change, geopolitical shock,
+      and a Federal Reserve policy pivot (unexpected hikes or cuts)
+    - For each invalidating event, note which case (bull/base/bear) it would
+      most affect and in which direction
+    - State explicitly that this memo reflects data as of the analysis date
+      only, and that positions should be re-evaluated as new information emerges
+
+11. INVESTMENT RECOMMENDATION
     - Balanced risk/reward assessment synthesizing the three cases
     - Key monitorables and catalysts over the next 12 months
 
-11. DISCLAIMER
+12. DISCLAIMER
     - This memo is for informational and educational purposes only and is not
       investment advice. Data is sourced from public APIs and may be delayed
       or incomplete.
