@@ -13,6 +13,7 @@ import {
   Building2,
   AlertTriangle,
   FileText,
+  RotateCcw,
 } from "lucide-react";
 
 const FEATURES = [
@@ -32,7 +33,7 @@ const PIPELINE = [
   { icon: FileText, name: "Report" },
 ];
 
-export default function Home({ onAnalyze, error, busy }) {
+export default function Home({ onAnalyze, error, busy, lastTicker }) {
   const [ticker, setTicker] = useState("");
 
   const submit = () => {
@@ -105,6 +106,23 @@ export default function Home({ onAnalyze, error, busy }) {
           >
             {error}
           </motion.div>
+        )}
+
+        {lastTicker && (
+          <div className="mt-4 flex justify-center">
+            <motion.button
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              onClick={() => !busy && onAnalyze(lastTicker)}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 rounded-full border border-navy-600
+                         bg-navy-700 px-3.5 py-1.5 text-xs text-gray-300 transition
+                         hover:border-gold hover:text-gold disabled:opacity-60"
+            >
+              <RotateCcw size={11} />
+              Last analyzed: <span className="font-semibold text-white">{lastTicker}</span>
+            </motion.button>
+          </div>
         )}
       </motion.div>
 
