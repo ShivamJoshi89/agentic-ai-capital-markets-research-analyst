@@ -6,8 +6,13 @@ Main Streamlit application - Phase 4
 import streamlit as st
 import pandas as pd
 import sys
+import re
+import html as html_lib
 from pathlib import Path
+from datetime import datetime
 import logging
+
+import pytz
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent / "src"))
@@ -34,70 +39,297 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
-st.markdown("""
+# ============================================================
+# Institutional theme
+# ============================================================
+NAVY_BG = "#0a0e1a"
+NAVY_SIDEBAR = "#0d1224"
+CARD_BG = "#141929"
+CARD_BORDER = "#1e2d4a"
+GOLD = "#f0b429"
+GREEN = "#00c851"
+RED = "#ff4444"
+BLUE = "#33b5e5"
+TEXT_PRIMARY = "#ffffff"
+TEXT_SECONDARY = "#a0aec0"
+
+st.markdown(f"""
     <style>
-    .main {
-        padding: 2rem;
-    }
-    .metric-box {
-        background-color: #f0f2f6;
-        padding: 1.5rem;
-        border-radius: 0.5rem;
-        margin: 0.5rem 0;
-    }
-    .success-box {
-        background-color: #d4edda;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        border-left: 4px solid #28a745;
-    }
-    .error-box {
-        background-color: #f8d7da;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        border-left: 4px solid #dc3545;
-    }
-    .news-article {
-        background-color: #f8f9fa;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin: 0.5rem 0;
-        border-left: 4px solid #007bff;
-    }
-    .risk-high {
-        background-color: #ffe6e6;
-        border-left: 4px solid #dc3545;
-    }
-    .risk-medium {
-        background-color: #fff3cd;
-        border-left: 4px solid #ffc107;
-    }
-    .risk-low {
-        background-color: #d4edda;
-        border-left: 4px solid #28a745;
-    }
-    .memo-section {
-        background-color: #f8f9fa;
-        padding: 1.5rem;
-        border-radius: 0.5rem;
-        margin: 1rem 0;
-        border-left: 4px solid #007bff;
-    }
-    .sentiment-positive {
-        color: #28a745;
-        font-weight: bold;
-    }
-    .sentiment-neutral {
-        color: #ffc107;
-        font-weight: bold;
-    }
-    .sentiment-negative {
-        color: #dc3545;
-        font-weight: bold;
-    }
+    /* ---------- Base surfaces ---------- */
+    .stApp {{ background-color: {NAVY_BG}; }}
+    [data-testid="stSidebar"] {{
+        background-color: {NAVY_SIDEBAR};
+        border-right: 1px solid {CARD_BORDER};
+    }}
+    h1, h2, h3 {{ color: {GOLD} !important; letter-spacing: 0.01em; }}
+    hr {{ border-color: {CARD_BORDER}; }}
+
+    /* ---------- st.metric as dark cards ---------- */
+    [data-testid="stMetric"] {{
+        background: {CARD_BG};
+        border: 1px solid {CARD_BORDER};
+        border-radius: 10px;
+        padding: 0.9rem 1.1rem;
+    }}
+    [data-testid="stMetricLabel"] {{
+        color: {TEXT_SECONDARY} !important;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+    }}
+    [data-testid="stMetricValue"] {{ color: {TEXT_PRIMARY}; font-weight: 700; }}
+
+    /* ---------- Sidebar navigation as buttons ---------- */
+    [data-testid="stSidebar"] div[role="radiogroup"] > label {{
+        display: block;
+        padding: 0.55rem 0.9rem;
+        margin: 2px 0;
+        border-radius: 8px;
+        border-left: 3px solid transparent;
+        color: {TEXT_SECONDARY};
+        cursor: pointer;
+        transition: background 0.15s ease, color 0.15s ease;
+    }}
+    [data-testid="stSidebar"] div[role="radiogroup"] > label:hover {{
+        background: {CARD_BG};
+        color: {TEXT_PRIMARY};
+    }}
+    [data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) {{
+        background: {CARD_BG};
+        border-left: 3px solid {GOLD};
+        color: {GOLD};
+        font-weight: 600;
+    }}
+    [data-testid="stSidebar"] div[role="radiogroup"] label > div:first-child {{
+        display: none;  /* hide the radio circle */
+    }}
+
+    /* ---------- Inputs & buttons ---------- */
+    [data-testid="stTextInput"] input {{
+        background: {CARD_BG};
+        border: 1px solid {CARD_BORDER};
+        border-radius: 10px;
+        color: {TEXT_PRIMARY};
+        font-size: 1.05rem;
+        padding: 0.7rem 1rem;
+    }}
+    [data-testid="stTextInput"] input:focus {{
+        border: 1px solid {GOLD};
+        box-shadow: 0 0 0 1px {GOLD};
+    }}
+    .stButton > button, .stDownloadButton > button {{
+        background: {GOLD};
+        color: {NAVY_BG};
+        font-weight: 700;
+        border: none;
+        border-radius: 8px;
+        padding: 0.6rem 1.2rem;
+    }}
+    .stButton > button:hover, .stDownloadButton > button:hover {{
+        background: #d99e1b;
+        color: {NAVY_BG};
+    }}
+
+    /* ---------- Custom metric cards ---------- */
+    .aa-metric {{
+        background: {CARD_BG};
+        border: 1px solid {CARD_BORDER};
+        border-radius: 10px;
+        padding: 1rem 0.8rem;
+        text-align: center;
+        margin: 0.25rem 0;
+    }}
+    .aa-metric .value {{ font-size: 1.6rem; font-weight: 700; color: {TEXT_PRIMARY}; }}
+    .aa-metric .value.pos {{ color: {GREEN}; }}
+    .aa-metric .value.neg {{ color: {RED}; }}
+    .aa-metric .label {{
+        font-size: 0.72rem;
+        color: {TEXT_SECONDARY};
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-top: 0.35rem;
+    }}
+
+    /* ---------- Cards ---------- */
+    .aa-card {{
+        background: {CARD_BG};
+        border: 1px solid {CARD_BORDER};
+        border-radius: 12px;
+        padding: 1.25rem;
+        margin: 0.4rem 0;
+    }}
+    .aa-card .card-title {{ color: {GOLD}; font-weight: 700; font-size: 1rem; }}
+    .aa-card .card-sub {{ color: {TEXT_SECONDARY}; font-size: 0.82rem; margin-top: 0.3rem; }}
+
+    /* ---------- Hero ---------- */
+    .aa-hero {{ text-align: center; padding: 2.2rem 1rem 1.4rem 1rem; }}
+    .aa-hero .headline {{
+        font-size: 2.6rem; font-weight: 800; color: {GOLD};
+        letter-spacing: 0.01em; line-height: 1.15;
+    }}
+    .aa-hero .subline {{ font-size: 1.05rem; color: {TEXT_SECONDARY}; margin-top: 0.6rem; }}
+
+    /* ---------- Agent pipeline ---------- */
+    .aa-pipeline {{
+        display: flex; align-items: stretch; justify-content: space-between;
+        gap: 0; flex-wrap: wrap; margin: 0.5rem 0;
+    }}
+    .aa-step {{
+        flex: 1; min-width: 96px; text-align: center;
+        background: {CARD_BG}; border: 1px solid {CARD_BORDER};
+        border-radius: 10px; padding: 0.75rem 0.3rem; margin: 2px;
+    }}
+    .aa-step .icon {{ font-size: 1.25rem; }}
+    .aa-step .name {{
+        color: {TEXT_SECONDARY}; font-size: 0.66rem; margin-top: 0.3rem;
+        text-transform: uppercase; letter-spacing: 0.06em;
+    }}
+    .aa-connector {{
+        display: flex; align-items: center; color: {GOLD};
+        font-weight: 700; padding: 0 2px;
+    }}
+
+    /* ---------- Signal / risk / news cards (dark tints) ---------- */
+    .aa-flag {{ padding: 1rem; border-radius: 10px; margin: 0.5rem 0; color: {TEXT_PRIMARY}; }}
+    .aa-flag .flag-meta {{ color: {TEXT_SECONDARY}; font-size: 0.82rem; }}
+    .aa-flag-opp {{ background: rgba(0, 200, 81, 0.08); border-left: 4px solid {GREEN}; }}
+    .aa-flag-warn {{ background: rgba(240, 180, 41, 0.08); border-left: 4px solid {GOLD}; }}
+    .aa-flag-risk {{ background: rgba(255, 68, 68, 0.08); border-left: 4px solid {RED}; }}
+    .aa-news {{
+        background: {CARD_BG}; border: 1px solid {CARD_BORDER}; border-left: 4px solid {BLUE};
+        padding: 1rem; border-radius: 10px; margin: 0.5rem 0;
+    }}
+
+    /* ---------- Research memo ---------- */
+    .aa-memo {{
+        background: {CARD_BG}; border: 1px solid {CARD_BORDER};
+        border-radius: 12px; padding: 2rem 2.4rem; margin: 0.8rem 0;
+    }}
+    .aa-memo-header {{
+        display: flex; justify-content: space-between; align-items: baseline;
+        border-bottom: 2px solid {GOLD}; padding-bottom: 0.8rem; margin-bottom: 1.2rem;
+    }}
+    .aa-memo-header .memo-label {{
+        color: {GOLD}; font-weight: 800; letter-spacing: 0.25em; font-size: 0.85rem;
+    }}
+    .aa-memo-header .memo-ticker {{ color: {TEXT_PRIMARY}; font-size: 1.5rem; font-weight: 800; }}
+    .aa-memo-header .memo-date {{ color: {TEXT_SECONDARY}; font-size: 0.85rem; }}
+    .aa-memo-section-title {{
+        color: {GOLD}; font-weight: 700; font-size: 0.95rem;
+        letter-spacing: 0.06em; margin: 1.1rem 0 0.4rem 0;
+    }}
+    .aa-memo-divider {{ border: none; border-top: 1px solid rgba(240, 180, 41, 0.4); margin: 0.9rem 0; }}
+    .aa-memo-body {{ color: {TEXT_PRIMARY}; font-size: 0.92rem; line-height: 1.65; white-space: pre-wrap; }}
+    .aa-case {{ padding: 1rem 1.2rem; border-radius: 10px; margin: 0.9rem 0; }}
+    .aa-case .aa-memo-body {{ color: {TEXT_PRIMARY}; }}
+    .aa-case-bull {{ background: rgba(0, 200, 81, 0.08); border: 1px solid {GREEN}; }}
+    .aa-case-bear {{ background: rgba(255, 68, 68, 0.08); border: 1px solid {RED}; }}
+    .aa-case-base {{ background: rgba(51, 181, 229, 0.08); border: 1px solid {BLUE}; }}
+    .aa-case .case-tag {{ font-weight: 800; letter-spacing: 0.12em; font-size: 0.8rem; }}
+    .aa-case-bull .case-tag {{ color: {GREEN}; }}
+    .aa-case-bear .case-tag {{ color: {RED}; }}
+    .aa-case-base .case-tag {{ color: {BLUE}; }}
+
+    /* ---------- Sidebar brand & market status ---------- */
+    .aa-brand {{ padding: 0.4rem 0 1rem 0; border-bottom: 1px solid {CARD_BORDER}; margin-bottom: 0.8rem; }}
+    .aa-brand .brand-name {{ color: {GOLD}; font-size: 1.35rem; font-weight: 800; }}
+    .aa-brand .brand-tag {{ color: {TEXT_SECONDARY}; font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; }}
+    .aa-market-status {{
+        background: {CARD_BG}; border: 1px solid {CARD_BORDER}; border-radius: 10px;
+        padding: 0.7rem 0.9rem; margin-top: 1.2rem; font-size: 0.78rem; color: {TEXT_SECONDARY};
+    }}
+    .aa-market-status .dot {{ font-size: 0.7rem; }}
+    .aa-market-status .status-open {{ color: {GREEN}; font-weight: 700; }}
+    .aa-market-status .status-closed {{ color: {RED}; font-weight: 700; }}
     </style>
     """, unsafe_allow_html=True)
+
+
+# ============================================================
+# UI helpers
+# ============================================================
+
+def metric_card(label: str, value, signed: bool = False, arrow: bool = False, suffix: str = ""):
+    """Render a dark metric card. If signed, color the value green/red by sign
+    and optionally prefix an up/down arrow."""
+
+    css_class = ""
+    arrow_char = ""
+    display = "N/A" if value is None else str(value)
+
+    if signed and value is not None:
+        try:
+            numeric = float(str(value).replace("%", "").replace(",", ""))
+            if numeric > 0:
+                css_class = "pos"
+                arrow_char = "▲ " if arrow else ""
+                if not str(value).startswith("+"):
+                    display = f"+{value}"
+            elif numeric < 0:
+                css_class = "neg"
+                arrow_char = "▼ " if arrow else ""
+        except (ValueError, TypeError):
+            pass
+
+    st.markdown(f"""
+    <div class="aa-metric">
+        <div class="value {css_class}">{arrow_char}{html_lib.escape(display)}{suffix}</div>
+        <div class="label">{html_lib.escape(label)}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def render_market_status():
+    """Sidebar market status indicator with current date/time (US/Eastern)"""
+    now_et = datetime.now(pytz.timezone("US/Eastern"))
+    is_weekday = now_et.weekday() < 5
+    after_open = (now_et.hour, now_et.minute) >= (9, 30)
+    before_close = (now_et.hour, now_et.minute) < (16, 0)
+    is_open = is_weekday and after_open and before_close
+
+    if is_open:
+        status = '<span class="dot">🟢</span> <span class="status-open">NYSE OPEN</span>'
+    else:
+        status = '<span class="dot">🔴</span> <span class="status-closed">NYSE CLOSED</span>'
+
+    st.markdown(f"""
+    <div class="aa-market-status">
+        {status}<br>
+        {now_et.strftime('%A, %b %d %Y')}<br>
+        {now_et.strftime('%I:%M %p')} ET
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def split_memo_sections(memo: str):
+    """Split LLM memo text into (title, body) sections.
+
+    Header lines are numbered and/or mostly-uppercase (e.g. '7. BULL CASE').
+    Returns [(None, memo)] if no headers are found.
+    """
+    header_re = re.compile(r"^\s*(?:\d+\.\s*)?([A-Z][A-Z0-9 /&()',\.\-]{3,}):?\s*$")
+
+    sections = []
+    current_title = None
+    current_lines = []
+
+    for line in memo.splitlines():
+        match = header_re.match(line.strip())
+        if match:
+            if current_title is not None or current_lines:
+                sections.append((current_title, "\n".join(current_lines).strip()))
+            current_title = match.group(1).strip().rstrip(":")
+            current_lines = []
+        else:
+            current_lines.append(line)
+
+    if current_title is not None or current_lines:
+        sections.append((current_title, "\n".join(current_lines).strip()))
+
+    if not any(title for title, _ in sections):
+        return [(None, memo.strip())]
+
+    return sections
 
 
 # Initialize session state
@@ -148,104 +380,112 @@ def fetch_analysis(ticker: str):
         st.error(f"❌ Invalid ticker format: '{ticker}'. Please enter 1-5 uppercase letters (e.g., JPM, AAPL)")
         return False
     
+    progress = st.progress(0, text=f"🔎 Initializing analysis pipeline for {ticker}...")
+
     try:
-        with st.spinner(f"🔄 Running comprehensive analysis for {ticker}..."):
-            # Fetch company info
-            yfinance_client = YFinanceClient()
-            company_info = yfinance_client.get_company_info(ticker)
-            
-            if not company_info or not company_info.get("success"):
-                st.error(f"❌ Could not find ticker '{ticker}'. Please check the symbol and try again.")
-                logger.error(f"Failed to fetch company info for {ticker}")
-                return False
-            
-            # Fetch market data
-            st.info("📈 Analyzing market data...")
-            market_agent = MarketDataAgent()
-            market_data = market_agent.run(ticker)
-            
-            if not market_data.get("success"):
-                st.error(f"❌ Failed to fetch market data for {ticker}")
-                logger.error(f"Market data fetch failed: {market_data.get('error')}")
-                return False
-            
-            # Fetch fundamentals
-            st.info("💰 Analyzing financial fundamentals...")
-            fundamentals_agent = FinancialsAgent()
-            fundamentals_data = fundamentals_agent.run(ticker)
-            
-            if not fundamentals_data.get("success"):
-                st.warning(f"⚠️ Some fundamentals data unavailable for {ticker}")
-            
-            # Fetch news
-            st.info("📰 Collecting news and sentiment...")
-            news_agent = NewsAgent()
-            company_name = company_info.get("company_name", ticker)
-            news_data = news_agent.run(ticker, company_name)
-            
-            if not news_data.get("success"):
-                st.warning(f"⚠️ Could not fetch news for {ticker}")
-                news_data = {"success": False, "articles": []}
-            
-            # Fetch macro data
-            st.info("🌍 Retrieving macroeconomic indicators...")
-            macro_agent = MacroAgent()
-            sector = company_info.get("sector", None)
-            macro_data = macro_agent.run(ticker=ticker, sector=sector)
-            
-            if not macro_data.get("success"):
-                st.warning(f"⚠️ Could not fetch macro data")
-                macro_data = {"success": False}
-            
-            # Build peer comparison
-            st.info("🏦 Building peer comparison...")
-            peer_agent = PeerComparisonAgent()
-            peer_data = peer_agent.run(ticker)
+        # Fetch company info
+        progress.progress(8, text=f"🏢 Resolving company profile for {ticker}...")
+        yfinance_client = YFinanceClient()
+        company_info = yfinance_client.get_company_info(ticker)
 
-            if not peer_data.get("success"):
-                st.warning(f"⚠️ Could not build peer comparison for {ticker}")
-                peer_data = {"success": False}
+        if not company_info or not company_info.get("success"):
+            progress.empty()
+            st.error(f"❌ Could not find ticker '{ticker}'. Please check the symbol and try again.")
+            logger.error(f"Failed to fetch company info for {ticker}")
+            return False
 
-            # Analyze risks
-            st.info("⚠️ Identifying key risks...")
-            risk_agent = RiskAgent()
-            all_analysis_data = {
-                "market_data": market_data,
-                "fundamentals_data": fundamentals_data,
-                "news_data": news_data,
-                "company_info": company_info,
-                "macro_data": macro_data
-            }
-            risk_data = risk_agent.run(ticker, all_analysis_data)
-            
-            if not risk_data.get("success"):
-                st.warning(f"⚠️ Could not complete risk analysis")
-                risk_data = {"success": False, "risks": []}
-            
-            # Generate final memo
-            st.info("📝 Generating investment research memo...")
-            report_agent = ReportAgent()
-            all_analysis_data["risk_data"] = risk_data
-            memo_data = report_agent.run(ticker, all_analysis_data)
-            
-            if not memo_data.get("success"):
-                st.warning(f"⚠️ Could not generate full memo with LLM, using fallback")
-                # Fallback memo data still works even if LLM fails
-            
-            # Store in session state
-            st.session_state.ticker = ticker
-            st.session_state.market_data = market_data
-            st.session_state.fundamentals_data = fundamentals_data
-            st.session_state.company_info = company_info
-            st.session_state.news_data = news_data
-            st.session_state.macro_data = macro_data
-            st.session_state.risk_data = risk_data
-            st.session_state.memo_data = memo_data
-            st.session_state.peer_data = peer_data
+        # Fetch market data
+        progress.progress(20, text="📈 Market Data Agent — prices, returns, volatility...")
+        market_agent = MarketDataAgent()
+        market_data = market_agent.run(ticker)
 
-            return True
-    
+        if not market_data.get("success"):
+            progress.empty()
+            st.error(f"❌ Failed to fetch market data for {ticker}")
+            logger.error(f"Market data fetch failed: {market_data.get('error')}")
+            return False
+
+        # Fetch fundamentals
+        progress.progress(34, text="💰 Fundamentals Agent — financials and ratios...")
+        fundamentals_agent = FinancialsAgent()
+        fundamentals_data = fundamentals_agent.run(ticker)
+
+        if not fundamentals_data.get("success"):
+            st.warning(f"⚠️ Some fundamentals data unavailable for {ticker}")
+
+        # Fetch news
+        progress.progress(48, text="📰 News Agent — headlines and sentiment...")
+        news_agent = NewsAgent()
+        company_name = company_info.get("company_name", ticker)
+        news_data = news_agent.run(ticker, company_name)
+
+        if not news_data.get("success"):
+            st.warning(f"⚠️ Could not fetch news for {ticker}")
+            news_data = {"success": False, "articles": []}
+
+        # Fetch macro data
+        progress.progress(60, text="🌍 Macro Agent — FRED economic indicators...")
+        macro_agent = MacroAgent()
+        sector = company_info.get("sector", None)
+        macro_data = macro_agent.run(ticker=ticker, sector=sector)
+
+        if not macro_data.get("success"):
+            st.warning(f"⚠️ Could not fetch macro data")
+            macro_data = {"success": False}
+
+        # Build peer comparison
+        progress.progress(72, text="🏦 Peer Agent — comparable companies analysis...")
+        peer_agent = PeerComparisonAgent()
+        peer_data = peer_agent.run(ticker)
+
+        if not peer_data.get("success"):
+            st.warning(f"⚠️ Could not build peer comparison for {ticker}")
+            peer_data = {"success": False}
+
+        # Analyze risks
+        progress.progress(84, text="⚠️ Risk Agent — risk factors and special situations...")
+        risk_agent = RiskAgent()
+        all_analysis_data = {
+            "market_data": market_data,
+            "fundamentals_data": fundamentals_data,
+            "news_data": news_data,
+            "company_info": company_info,
+            "macro_data": macro_data
+        }
+        risk_data = risk_agent.run(ticker, all_analysis_data)
+
+        if not risk_data.get("success"):
+            st.warning(f"⚠️ Could not complete risk analysis")
+            risk_data = {"success": False, "risks": []}
+
+        # Generate final memo
+        progress.progress(94, text="📝 Report Agent — drafting research memo...")
+        report_agent = ReportAgent()
+        all_analysis_data["risk_data"] = risk_data
+        memo_data = report_agent.run(ticker, all_analysis_data)
+
+        if not memo_data.get("success"):
+            st.warning(f"⚠️ Could not generate full memo with LLM, using fallback")
+            # Fallback memo data still works even if LLM fails
+
+        progress.progress(100, text="✅ Analysis complete")
+
+        # Store in session state
+        st.session_state.ticker = ticker
+        st.session_state.market_data = market_data
+        st.session_state.fundamentals_data = fundamentals_data
+        st.session_state.company_info = company_info
+        st.session_state.news_data = news_data
+        st.session_state.macro_data = macro_data
+        st.session_state.risk_data = risk_data
+        st.session_state.memo_data = memo_data
+        st.session_state.peer_data = peer_data
+
+        progress.empty()
+        return True
+
     except Exception as e:
+        progress.empty()
         st.error(f"❌ Error fetching data: {str(e)}")
         logger.error(f"Error in fetch_analysis: {str(e)}")
         return False
@@ -253,47 +493,30 @@ def fetch_analysis(ticker: str):
 
 def show_home_page():
     """Display home page"""
-    
-    st.title("📊 Agentic AI Capital Markets Research Analyst")
-    
+
+    # Hero section
     st.markdown("""
-        ## Welcome to the AI-Powered Equity Research Platform
-        
-        This application automates the first layer of equity research by combining:
-        - 📈 Stock market data and technical analysis
-        - 💰 Company fundamentals and financial ratios
-        - 📰 Recent news and sentiment analysis
-        - 🏛️ SEC filing information
-        - 🌍 Macroeconomic context
-        - ⚠️ Risk identification and analysis
-        - 📋 Professional investment memo generation
-        
-        ### How to Use
-        
-        1. Enter a stock ticker (e.g., JPM, AAPL, NVDA)
-        2. Click "Generate Full Analysis"
-        3. Review the comprehensive analyst-style report
-        
-        ---
-        """)
-    
-    # Input section
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
+    <div class="aa-hero">
+        <div class="headline">Institutional-Grade Equity Research</div>
+        <div class="subline">Powered by Multi-Agent AI</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Centered search bar
+    _, center, _ = st.columns([1, 2, 1])
+    with center:
         ticker_input = st.text_input(
             "Enter Stock Ticker",
-            placeholder="e.g., JPM, AAPL, NVDA, MS",
-            key="ticker_input"
+            placeholder="Enter a ticker — JPM, AAPL, NVDA, MS...",
+            key="ticker_input",
+            label_visibility="collapsed"
         )
-    
-    with col2:
         generate_button = st.button(
             "🔍 Generate Full Analysis",
             key="generate_button",
             use_container_width=True
         )
-    
+
     if generate_button:
         if not ticker_input:
             st.warning("⚠️ Please enter a stock ticker")
@@ -302,14 +525,53 @@ def show_home_page():
             if success:
                 st.success(f"✅ Complete analysis generated for {ticker_input.upper()}!")
                 st.rerun()
-    
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Feature cards
+    feature_cards = [
+        ("🤖", "8 AI Agents", "Specialized analysts working in concert"),
+        ("🔌", "6 Data Sources", "yfinance, FRED, Google News, SEC EDGAR, NewsAPI, OpenAI"),
+        ("⚡", "Real-Time Data", "Live market, macro and headline feeds"),
+        ("🏛️", "Wall Street Methodology", "Comps, earnings quality, bull/base/bear cases"),
+    ]
+    cols = st.columns(4)
+    for col, (icon, title, sub) in zip(cols, feature_cards):
+        with col:
+            st.markdown(f"""
+            <div class="aa-card" style="text-align:center; min-height: 138px;">
+                <div style="font-size:1.6rem;">{icon}</div>
+                <div class="card-title">{title}</div>
+                <div class="card-sub">{sub}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # Agent pipeline visualization
+    st.markdown("---")
+    st.subheader("Analysis Pipeline")
+
+    pipeline_steps = [
+        ("📈", "Market Data"),
+        ("💰", "Fundamentals"),
+        ("📰", "News"),
+        ("🌍", "Macro"),
+        ("🏦", "Peers"),
+        ("⚠️", "Risk"),
+        ("📝", "Report"),
+    ]
+    step_html = '<div class="aa-connector">→</div>'.join(
+        f'<div class="aa-step"><div class="icon">{icon}</div><div class="name">{name}</div></div>'
+        for icon, name in pipeline_steps
+    )
+    st.markdown(f'<div class="aa-pipeline">{step_html}</div>', unsafe_allow_html=True)
+
     # Show last analyzed ticker if available
     if st.session_state.ticker:
         st.markdown("---")
-        st.markdown(f"### 📍 Last Analyzed: {st.session_state.ticker}")
-        
+        st.subheader(f"📍 Last Analyzed: {st.session_state.ticker}")
+
         col1, col2, col3 = st.columns(3)
-        
+
         if st.session_state.market_data and st.session_state.market_data.get("success"):
             metrics = st.session_state.market_data.get("metrics", {})
             with col1:
@@ -318,30 +580,13 @@ def show_home_page():
                     f"${metrics.get('latest_price', 'N/A')}",
                     delta=f"{metrics.get('price_change_pct', 0):.2f}%"
                 )
-        
+
         if st.session_state.company_info and st.session_state.company_info.get("success"):
             with col2:
                 st.metric("Market Cap", format_large_number(st.session_state.company_info.get("market_cap")))
-            
+
             with col3:
                 st.metric("Sector", st.session_state.company_info.get("sector", "N/A"))
-    
-    # Information boxes
-    st.markdown("---")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.metric("Agents", 8)
-        st.caption("Market, Fundamentals, News, Macro, Risk, Report, Critic")
-    
-    with col2:
-        st.metric("Data Sources", 4)
-        st.caption("yfinance, SEC EDGAR, NewsAPI, FRED")
-    
-    with col3:
-        st.metric("Features", 12)
-        st.caption("Returns, Vol, MA, Fundamentals, Risks, Memo")
 
 
 def show_company_overview():
@@ -404,89 +649,111 @@ def show_market_performance():
     metrics = market_data.get("metrics", {})
     
     st.title(f"📈 Market Performance - {ticker}")
-    
+
     # Price and returns
     col1, col2, col3, col4 = st.columns(4)
-    
+
     with col1:
         st.metric(
             "Current Price",
             f"${metrics.get('latest_price', 'N/A')}",
             delta=f"{metrics.get('price_change_pct', 0):.2f}%"
         )
-    
+
     with col2:
-        st.metric("1-Month Return", f"{metrics.get('one_month_return', 'N/A')}%")
-    
+        metric_card("1-Month Return", metrics.get("one_month_return"), signed=True, arrow=True, suffix="%")
+
     with col3:
-        st.metric("3-Month Return", f"{metrics.get('three_month_return', 'N/A')}%")
-    
+        metric_card("3-Month Return", metrics.get("three_month_return"), signed=True, arrow=True, suffix="%")
+
     with col4:
-        st.metric("6-Month Return", f"{metrics.get('six_month_return', 'N/A')}%")
-    
+        metric_card("6-Month Return", metrics.get("six_month_return"), signed=True, arrow=True, suffix="%")
+
     # Technical metrics
     col1, col2, col3, col4 = st.columns(4)
-    
+
     with col1:
-        st.metric("YTD Return", f"{metrics.get('ytd_return', 'N/A')}%")
-    
+        metric_card("YTD Return", metrics.get("ytd_return"), signed=True, arrow=True, suffix="%")
+
     with col2:
-        st.metric("Volatility (Annual)", f"{metrics.get('volatility', 'N/A')}%")
-    
+        metric_card("Volatility (Annual)", metrics.get("volatility"), suffix="%")
+
     with col3:
-        st.metric("Max Drawdown", f"{metrics.get('max_drawdown', 'N/A')}%")
-    
+        metric_card("Max Drawdown", metrics.get("max_drawdown"), signed=True, arrow=True, suffix="%")
+
     with col4:
-        st.metric("Avg Volume", f"{metrics.get('avg_volume', 'N/A'):,.0f}")
-    
+        avg_volume = metrics.get("avg_volume")
+        metric_card("Avg Volume", f"{avg_volume:,.0f}" if avg_volume else None)
+
     # Moving averages
     st.subheader("📊 Moving Averages")
     col1, col2, col3 = st.columns(3)
-    
+
     with col1:
-        st.metric("20-Day MA", f"${metrics.get('ma_20', 'N/A')}")
-    
+        metric_card("20-Day MA", f"${metrics.get('ma_20', 'N/A')}")
+
     with col2:
-        st.metric("50-Day MA", f"${metrics.get('ma_50', 'N/A')}")
-    
+        metric_card("50-Day MA", f"${metrics.get('ma_50', 'N/A')}")
+
     with col3:
-        st.metric("200-Day MA", f"${metrics.get('ma_200', 'N/A')}")
-    
-    # Price chart
+        metric_card("200-Day MA", f"${metrics.get('ma_200', 'N/A')}")
+
+    # Price chart: stacked panels (price above, volume below) on a shared
+    # x-axis - one scale per panel, no dual-axis overlay
     if market_data.get("data") is not None:
         st.subheader("📉 Price Chart (1 Year)")
-        
+
         import plotly.graph_objects as go
-        
+        from plotly.subplots import make_subplots
+
         data = market_data.get("data")
-        fig = go.Figure()
-        
+
+        fig = make_subplots(
+            rows=2, cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.04,
+            row_heights=[0.72, 0.28]
+        )
+
         fig.add_trace(go.Scatter(
             x=data.index,
             y=data["Close"],
-            mode='lines',
-            name='Close Price',
-            line=dict(color='#1f77b4', width=2)
-        ))
-        
-        fig.add_trace(go.Scatter(
+            mode="lines",
+            name="Close",
+            line=dict(color=GOLD, width=2),
+            hovertemplate="$%{y:.2f}<extra>Close</extra>"
+        ), row=1, col=1)
+
+        # Volume bars colored by up/down day
+        up_day = data["Close"].diff().fillna(0) >= 0
+        volume_colors = [GREEN if up else RED for up in up_day]
+
+        fig.add_trace(go.Bar(
             x=data.index,
             y=data["Volume"],
-            mode='lines',
-            name='Volume',
-            yaxis='y2',
-            line=dict(color='#ff7f0e', width=1)
-        ))
-        
+            name="Volume",
+            marker_color=volume_colors,
+            marker_line_width=0,
+            opacity=0.8,
+            hovertemplate="%{y:,.0f}<extra>Volume</extra>"
+        ), row=2, col=1)
+
         fig.update_layout(
-            title=f"{ticker} - 1 Year Price History",
-            xaxis_title="Date",
-            yaxis_title="Price ($)",
-            yaxis2=dict(title="Volume", overlaying="y", side="right"),
+            title=dict(text=f"{ticker} — 1 Year Price History", font=dict(color=GOLD, size=16)),
+            paper_bgcolor=NAVY_BG,
+            plot_bgcolor=CARD_BG,
+            font=dict(color=TEXT_SECONDARY),
             hovermode="x unified",
-            height=500
+            showlegend=False,
+            height=540,
+            margin=dict(l=10, r=10, t=50, b=10),
+            bargap=0.1
         )
-        
+        fig.update_xaxes(gridcolor=CARD_BORDER, zeroline=False, showline=False)
+        fig.update_yaxes(gridcolor=CARD_BORDER, zeroline=False, showline=False)
+        fig.update_yaxes(title_text="Price ($)", row=1, col=1)
+        fig.update_yaxes(title_text="Volume", row=2, col=1)
+
         st.plotly_chart(fig, use_container_width=True)
 
 
@@ -615,9 +882,9 @@ def show_peer_comparison():
             worst_idx = numeric.idxmin() if higher_is_better else numeric.idxmax()
             for i, idx in enumerate(column.index):
                 if idx == best_idx:
-                    styles[i] = "background-color: #d4edda; color: #155724; font-weight: bold"
+                    styles[i] = f"background-color: rgba(0, 200, 81, 0.18); color: {GREEN}; font-weight: bold"
                 elif idx == worst_idx:
-                    styles[i] = "background-color: #f8d7da; color: #721c24; font-weight: bold"
+                    styles[i] = f"background-color: rgba(255, 68, 68, 0.18); color: {RED}; font-weight: bold"
         return styles
 
     styler = df.style
@@ -707,14 +974,12 @@ def show_news_sentiment():
             is_opportunity = flag.get("signal_type") == "opportunity_signal"
             icon = "⚡" if is_opportunity else "⚠️"
             signal_label = "Opportunity Signal" if is_opportunity else "Risk Signal"
-            bg_color = "#d4edda" if is_opportunity else "#fff3cd"
-            border_color = "#28a745" if is_opportunity else "#ffc107"
+            flag_class = "aa-flag-opp" if is_opportunity else "aa-flag-warn"
 
             st.markdown(f"""
-            <div style="background-color: {bg_color}; padding: 1rem; border-radius: 0.5rem;
-                        margin: 0.5rem 0; border-left: 5px solid {border_color};">
-                <strong>{icon} {flag.get('category', 'Unknown')}</strong> — {signal_label}
-                <em>(matched: "{flag.get('matched_keyword', '')}")</em><br>
+            <div class="aa-flag {flag_class}">
+                <strong>{icon} {flag.get('category', 'Unknown')}</strong>
+                <span class="flag-meta">— {signal_label} <em>(matched: "{flag.get('matched_keyword', '')}")</em></span><br>
                 {flag.get('headline', '')}
             </div>
             """, unsafe_allow_html=True)
@@ -731,28 +996,29 @@ def show_news_sentiment():
     else:
         for idx, article in enumerate(articles, 1):
             sentiment = article.get("sentiment", "Neutral")
-            
-            # Sentiment badge color
+
             if sentiment == "Positive":
-                sentiment_class = "✅"
+                badge = f'<span style="color:{GREEN}; font-weight:700;">▲ Positive</span>'
             elif sentiment == "Negative":
-                sentiment_class = "❌"
+                badge = f'<span style="color:{RED}; font-weight:700;">▼ Negative</span>'
             else:
-                sentiment_class = "⚪"
-            
-            with st.container():
-                col1, col2 = st.columns([0.1, 0.9])
-                
-                with col1:
-                    st.write(sentiment_class)
-                
-                with col2:
-                    st.markdown(f"**{article.get('title', 'N/A')}**")
-                    st.caption(f"📅 {article.get('published_date', 'N/A')} | 📰 {article.get('source', 'N/A')}")
-                    st.write(article.get("description", "")[:200] + "...")
-                    st.markdown(f"[Read More →]({article.get('url', '#')})")
-                
-                st.markdown("---")
+                badge = f'<span style="color:{TEXT_SECONDARY}; font-weight:700;">● Neutral</span>'
+
+            title = html_lib.escape(article.get("title", "N/A"))
+            description = html_lib.escape(article.get("description", "")[:200])
+            url = article.get("url", "#")
+
+            st.markdown(f"""
+            <div class="aa-news">
+                <strong>{title}</strong><br>
+                <span class="flag-meta" style="color:{TEXT_SECONDARY}; font-size:0.8rem;">
+                    {badge} &nbsp;|&nbsp; 📅 {html_lib.escape(str(article.get('published_date', 'N/A')))}
+                    &nbsp;|&nbsp; 📰 {html_lib.escape(str(article.get('source', 'N/A')))}
+                </span>
+                <p style="color:{TEXT_SECONDARY}; font-size:0.88rem; margin:0.5rem 0 0.3rem 0;">{description}...</p>
+                <a href="{url}" style="color:{GOLD};">Read More →</a>
+            </div>
+            """, unsafe_allow_html=True)
 
 
 def show_macro_environment():
@@ -889,30 +1155,33 @@ def show_risk_analysis():
                 
                 for risk in categories[category]:
                     severity = risk.get("severity", "Low")
-                    
-                    # Color and icon based on severity
+
+                    # Dark-tinted card by severity
                     if severity == "High":
                         icon = "🔴"
-                        color = "#ffe6e6"
-                        border_color = "#dc3545"
+                        flag_class = "aa-flag-risk"
+                        severity_color = RED
                     elif severity == "Medium":
                         icon = "🟡"
-                        color = "#fff3cd"
-                        border_color = "#ffc107"
+                        flag_class = "aa-flag-warn"
+                        severity_color = GOLD
                     else:
                         icon = "🟢"
-                        color = "#d4edda"
-                        border_color = "#28a745"
-                    
-                    # Risk card
+                        flag_class = "aa-flag-opp"
+                        severity_color = GREEN
+
                     st.markdown(f"""
-                    <div style="background-color: {color}; padding: 1.5rem; border-radius: 0.5rem; 
-                                margin: 1rem 0; border-left: 5px solid {border_color};">
-                        <h4>{icon} {risk.get('title', 'Unknown Risk')}</h4>
-                        <p><strong>Severity:</strong> {severity}</p>
-                        <p><strong>Description:</strong> {risk.get('description', 'No description')}</p>
-                        <p><strong>Metric:</strong> {risk.get('metric', 'N/A')}</p>
-                        <p><strong>Potential Impact:</strong> {risk.get('impact', 'Unknown')}</p>
+                    <div class="aa-flag {flag_class}" style="padding: 1.3rem;">
+                        <div style="font-size:1.05rem; font-weight:700; margin-bottom:0.5rem;">
+                            {icon} {risk.get('title', 'Unknown Risk')}
+                            <span style="color:{severity_color}; font-size:0.78rem; letter-spacing:0.08em;
+                                         margin-left:0.6rem;">{severity.upper()} SEVERITY</span>
+                        </div>
+                        <p style="margin:0.3rem 0;">{risk.get('description', 'No description')}</p>
+                        <p class="flag-meta" style="margin:0.3rem 0;">
+                            <strong>Metric:</strong> {risk.get('metric', 'N/A')}
+                            &nbsp;|&nbsp; <strong>Potential Impact:</strong> {risk.get('impact', 'Unknown')}
+                        </p>
                     </div>
                     """, unsafe_allow_html=True)
     
@@ -961,11 +1230,53 @@ def show_research_memo():
         memo = memo_data.get("memo", "") if memo_data else ""
     else:
         memo = memo_data.get("memo", "")
-    
+
     if memo:
-        # Display memo in formatted sections
-        st.markdown(memo)
-        
+        # Styled analyst-report container
+        report_date = datetime.now(pytz.timezone("US/Eastern")).strftime("%B %d, %Y")
+
+        section_parts = []
+        for title, body in split_memo_sections(memo):
+            safe_body = html_lib.escape(body)
+            title_upper = (title or "").upper()
+
+            if "BULL" in title_upper:
+                section_parts.append(
+                    f'<div class="aa-case aa-case-bull"><div class="case-tag">🐂 {html_lib.escape(title)}</div>'
+                    f'<div class="aa-memo-body">{safe_body}</div></div>'
+                )
+            elif "BEAR" in title_upper:
+                section_parts.append(
+                    f'<div class="aa-case aa-case-bear"><div class="case-tag">🐻 {html_lib.escape(title)}</div>'
+                    f'<div class="aa-memo-body">{safe_body}</div></div>'
+                )
+            elif "BASE" in title_upper:
+                section_parts.append(
+                    f'<div class="aa-case aa-case-base"><div class="case-tag">⚖️ {html_lib.escape(title)}</div>'
+                    f'<div class="aa-memo-body">{safe_body}</div></div>'
+                )
+            elif title:
+                section_parts.append(
+                    f'<hr class="aa-memo-divider">'
+                    f'<div class="aa-memo-section-title">{html_lib.escape(title)}</div>'
+                    f'<div class="aa-memo-body">{safe_body}</div>'
+                )
+            elif body:
+                section_parts.append(f'<div class="aa-memo-body">{safe_body}</div>')
+
+        st.markdown(f"""
+        <div class="aa-memo">
+            <div class="aa-memo-header">
+                <div>
+                    <div class="memo-label">RESEARCH MEMO</div>
+                    <div class="memo-ticker">{html_lib.escape(ticker)}</div>
+                </div>
+                <div class="memo-date">{report_date}<br>Multi-Agent AI Research Desk</div>
+            </div>
+            {''.join(section_parts)}
+        </div>
+        """, unsafe_allow_html=True)
+
         st.markdown("---")
         
         st.markdown("""
@@ -1145,7 +1456,13 @@ def main():
     
     # Sidebar
     with st.sidebar:
-        st.title("🤖 AI Analyst")
+        st.markdown("""
+        <div class="aa-brand">
+            <div class="brand-name">📊 AI Analyst</div>
+            <div class="brand-tag">Institutional Research Platform</div>
+        </div>
+        """, unsafe_allow_html=True)
+
         page = st.radio(
             "Navigation",
             [
@@ -1159,8 +1476,11 @@ def main():
                 "Risk Analysis",
                 "Research Memo",
                 "About"
-            ]
+            ],
+            label_visibility="collapsed"
         )
+
+        render_market_status()
     
     # Main content
     if page == "Home":
