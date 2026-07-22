@@ -32,6 +32,10 @@ outputs/*
 *.json
 logs/*
 
+# *.json above is for data outputs - frontend package manifests must be tracked
+!frontend/package.json
+!frontend/package-lock.json
+
 # Testing
 .pytest_cache/
 .coverage
