@@ -4,6 +4,7 @@ Main Streamlit application - Phase 4
 """
 
 import streamlit as st
+import pandas as pd
 import sys
 from pathlib import Path
 import logging
@@ -17,6 +18,7 @@ from agents.news_agent import NewsAgent
 from agents.macro_agent import MacroAgent
 from agents.risk_agent import RiskAgent
 from agents.report_agent import ReportAgent
+from agents.peer_agent import PeerComparisonAgent
 from data_sources.yfinance_client import YFinanceClient
 from utils.helpers import validate_ticker, format_currency, format_percentage
 from utils.logger import setup_logger
@@ -115,6 +117,8 @@ if "risk_data" not in st.session_state:
     st.session_state.risk_data = None
 if "memo_data" not in st.session_state:
     st.session_state.memo_data = None
+if "peer_data" not in st.session_state:
+    st.session_state.peer_data = None
 
 
 def format_large_number(value):
@@ -193,6 +197,15 @@ def fetch_analysis(ticker: str):
                 st.warning(f"⚠️ Could not fetch macro data")
                 macro_data = {"success": False}
             
+            # Build peer comparison
+            st.info("🏦 Building peer comparison...")
+            peer_agent = PeerComparisonAgent()
+            peer_data = peer_agent.run(ticker)
+
+            if not peer_data.get("success"):
+                st.warning(f"⚠️ Could not build peer comparison for {ticker}")
+                peer_data = {"success": False}
+
             # Analyze risks
             st.info("⚠️ Identifying key risks...")
             risk_agent = RiskAgent()
@@ -228,7 +241,8 @@ def fetch_analysis(ticker: str):
             st.session_state.macro_data = macro_data
             st.session_state.risk_data = risk_data
             st.session_state.memo_data = memo_data
-            
+            st.session_state.peer_data = peer_data
+
             return True
     
     except Exception as e:
@@ -552,6 +566,96 @@ def show_fundamentals():
         st.metric("Quick Ratio", fundamentals.get("quick_ratio", "N/A"))
 
 
+def show_peer_comparison():
+    """Display peer comparison page"""
+
+    if not st.session_state.peer_data or not st.session_state.peer_data.get("success"):
+        st.warning("⚠️ No peer comparison available. Please analyze a ticker first.")
+        return
+
+    ticker = st.session_state.ticker
+    peer_data = st.session_state.peer_data
+    companies = peer_data.get("companies", [])
+
+    st.title(f"🏦 Peer Comparison - {ticker}")
+    st.caption(
+        f"Sector: {peer_data.get('sector', 'N/A')} | Industry: {peer_data.get('industry', 'N/A')} | "
+        f"{len(companies) - 1} peers identified via yfinance"
+    )
+
+    # Metric key -> (column label, higher_is_better, format string)
+    metric_config = {
+        "pe_ratio": ("P/E Ratio", False, "{:.2f}"),
+        "revenue_growth": ("Revenue Growth", True, "{:.1f}%"),
+        "profit_margin": ("Profit Margin", True, "{:.1f}%"),
+        "roe": ("ROE", True, "{:.1f}%"),
+        "debt_to_equity": ("Debt-to-Equity", False, "{:.1f}"),
+    }
+
+    # Build comparison table (target first, marked with a star)
+    rows = []
+    for company in companies:
+        is_target = company.get("ticker") == ticker
+        row = {
+            "Ticker": f"⭐ {company.get('ticker')}" if is_target else company.get("ticker"),
+            "Company": company.get("company", "N/A"),
+        }
+        for key, (label, _, _) in metric_config.items():
+            row[label] = company.get(key)
+        rows.append(row)
+
+    df = pd.DataFrame(rows).set_index("Ticker")
+
+    def highlight_best_worst(column, higher_is_better):
+        """Green for best value in column, red for worst"""
+        numeric = pd.to_numeric(column, errors="coerce")
+        styles = [""] * len(column)
+        if numeric.notna().sum() >= 2:
+            best_idx = numeric.idxmax() if higher_is_better else numeric.idxmin()
+            worst_idx = numeric.idxmin() if higher_is_better else numeric.idxmax()
+            for i, idx in enumerate(column.index):
+                if idx == best_idx:
+                    styles[i] = "background-color: #d4edda; color: #155724; font-weight: bold"
+                elif idx == worst_idx:
+                    styles[i] = "background-color: #f8d7da; color: #721c24; font-weight: bold"
+        return styles
+
+    styler = df.style
+    for key, (label, higher_is_better, fmt) in metric_config.items():
+        styler = styler.apply(
+            lambda col, hib=higher_is_better: highlight_best_worst(col, hib),
+            subset=[label]
+        )
+        styler = styler.format({label: fmt}, na_rep="N/A")
+
+    st.dataframe(styler, use_container_width=True)
+    st.caption("🟩 Best in class | 🟥 Worst in class (lower is better for P/E and Debt-to-Equity)")
+
+    st.markdown("---")
+
+    # Rank summary for the analyzed company
+    st.subheader(f"📊 How {ticker} Ranks Against Peers")
+
+    rank_cols = st.columns(len(metric_config))
+    for i, (key, (label, higher_is_better, _)) in enumerate(metric_config.items()):
+        values = pd.Series(
+            {c.get("ticker"): c.get(key) for c in companies}, dtype="float64"
+        ).dropna()
+
+        with rank_cols[i]:
+            if ticker in values.index and len(values) >= 2:
+                rank = int(values.rank(ascending=not higher_is_better, method="min")[ticker])
+                st.metric(label, f"#{rank} of {len(values)}")
+            else:
+                st.metric(label, "N/A")
+
+    if peer_data.get("sector") == "Financial Services":
+        st.info(
+            "ℹ️ Debt-to-Equity is often unavailable for banks — financial institutions "
+            "are assessed on regulatory capital metrics instead."
+        )
+
+
 def show_news_sentiment():
     """Display news and sentiment page"""
     
@@ -583,9 +687,40 @@ def show_news_sentiment():
     
     with col4:
         st.metric("Negative Articles", sentiment_counts.get("negative", 0))
-    
+
     st.markdown("---")
-    
+
+    # Special situations radar (flags produced by the Risk Agent)
+    st.subheader("🎯 Special Situations Radar")
+
+    risk_data = st.session_state.risk_data or {}
+    special_flags = risk_data.get("special_situations", [])
+
+    if not special_flags:
+        st.caption("No special situation signals detected in recent headlines.")
+    else:
+        opportunity_count = sum(1 for f in special_flags if f.get("signal_type") == "opportunity_signal")
+        risk_count = len(special_flags) - opportunity_count
+        st.write(f"**{len(special_flags)} signal(s) detected** — ⚡ {opportunity_count} opportunity | ⚠️ {risk_count} risk")
+
+        for flag in special_flags:
+            is_opportunity = flag.get("signal_type") == "opportunity_signal"
+            icon = "⚡" if is_opportunity else "⚠️"
+            signal_label = "Opportunity Signal" if is_opportunity else "Risk Signal"
+            bg_color = "#d4edda" if is_opportunity else "#fff3cd"
+            border_color = "#28a745" if is_opportunity else "#ffc107"
+
+            st.markdown(f"""
+            <div style="background-color: {bg_color}; padding: 1rem; border-radius: 0.5rem;
+                        margin: 0.5rem 0; border-left: 5px solid {border_color};">
+                <strong>{icon} {flag.get('category', 'Unknown')}</strong> — {signal_label}
+                <em>(matched: "{flag.get('matched_keyword', '')}")</em><br>
+                {flag.get('headline', '')}
+            </div>
+            """, unsafe_allow_html=True)
+
+    st.markdown("---")
+
     # Articles
     st.subheader(f"📋 Recent Headlines ({total_articles} articles)")
     
@@ -1018,6 +1153,7 @@ def main():
                 "Company Overview",
                 "Market Performance",
                 "Fundamentals",
+                "Peer Comparison",
                 "News & Sentiment",
                 "Macro Environment",
                 "Risk Analysis",
@@ -1035,6 +1171,8 @@ def main():
         show_market_performance()
     elif page == "Fundamentals":
         show_fundamentals()
+    elif page == "Peer Comparison":
+        show_peer_comparison()
     elif page == "News & Sentiment":
         show_news_sentiment()
     elif page == "Macro Environment":

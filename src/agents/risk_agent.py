@@ -13,6 +13,74 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 logger = logging.getLogger(__name__)
 
+# Special-situation signals scanned for in news headlines. Keywords are
+# matched case-insensitively; each category fires at most once per headline.
+SPECIAL_SITUATION_PATTERNS = [
+    {
+        "category": "Activist Investor",
+        "signal_type": "opportunity_signal",
+        "keywords": ["activist investor", "activist stake", "activist fund",
+                     "activist campaign", "activist pressure", "board seat"],
+    },
+    {
+        "category": "M&A / Acquisition",
+        "signal_type": "opportunity_signal",
+        "keywords": ["merger", "acquisition", "acquires", "to acquire", "takeover",
+                     "buyout", "deal talks", "bid for", "combination with"],
+    },
+    {
+        "category": "Insider Buying",
+        "signal_type": "opportunity_signal",
+        "keywords": ["insider buying", "insider buys", "insider purchase",
+                     "ceo buys", "director buys", "executives buy"],
+    },
+    {
+        "category": "Insider Selling",
+        "signal_type": "risk_signal",
+        "keywords": ["insider selling", "insider sells", "insider sale",
+                     "ceo sells", "director sells", "executives sell"],
+    },
+    {
+        "category": "Earnings Beat",
+        "signal_type": "opportunity_signal",
+        "keywords": ["earnings beat", "beats earnings", "beats estimates",
+                     "tops estimates", "beat expectations", "beats expectations",
+                     "record quarter", "raises guidance"],
+    },
+    {
+        "category": "Earnings Miss",
+        "signal_type": "risk_signal",
+        "keywords": ["earnings miss", "misses earnings", "misses estimates",
+                     "missed estimates", "missed expectations", "falls short of estimates",
+                     "cuts guidance", "lowers guidance", "profit warning"],
+    },
+    {
+        "category": "Regulatory Catalyst (Positive)",
+        "signal_type": "opportunity_signal",
+        "keywords": ["fda approval", "fda approves", "fda clearance",
+                     "regulatory approval", "wins approval", "cleared by regulators"],
+    },
+    {
+        "category": "Regulatory Catalyst (Negative)",
+        "signal_type": "risk_signal",
+        "keywords": ["fda rejection", "fda declines", "regulatory probe",
+                     "regulatory scrutiny", "sec investigation", "sec probe",
+                     "doj investigation", "antitrust", "lawsuit", "fined"],
+    },
+    {
+        "category": "Spin-off / Restructuring",
+        "signal_type": "opportunity_signal",
+        "keywords": ["spin-off", "spinoff", "spin off", "restructuring",
+                     "divestiture", "carve-out", "carve out", "breakup", "break-up"],
+    },
+    {
+        "category": "Share Buyback",
+        "signal_type": "opportunity_signal",
+        "keywords": ["buyback", "share repurchase", "repurchase program",
+                     "repurchase plan", "repurchase authorization"],
+    },
+]
+
 
 class RiskAgent:
     """
@@ -66,23 +134,66 @@ class RiskAgent:
             
             # Generate risk summary
             risk_summary = self._generate_risk_summary(ranked_risks)
-            
+
+            # Scan headlines for special situations (family office use case)
+            special_situations = self.detect_special_situations(news_data.get("articles", []))
+
             return {
                 "ticker": ticker,
                 "success": True,
                 "risks": ranked_risks,
                 "summary": risk_summary,
-                "total_risks": len(ranked_risks)
+                "total_risks": len(ranked_risks),
+                "special_situations": special_situations
             }
-        
+
         except Exception as e:
             logger.error(f"Error analyzing risks: {str(e)}")
             return {
                 "ticker": ticker,
                 "success": False,
                 "error": str(e),
-                "risks": []
+                "risks": [],
+                "special_situations": []
             }
+
+    def detect_special_situations(self, articles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Scan news headlines for special-situation signals: activist involvement,
+        M&A rumors, insider activity, earnings surprises, regulatory catalysts,
+        spin-offs/restructurings, and share buybacks.
+
+        Args:
+            articles: News articles as returned by the News Agent
+
+        Returns:
+            List of flags, each with signal_type ("opportunity_signal" or
+            "risk_signal"), category, matched keyword, and the headline
+        """
+        flags = []
+
+        for article in articles or []:
+            headline = article.get("title", "")
+            if not headline:
+                continue
+            text = headline.lower()
+
+            for pattern in SPECIAL_SITUATION_PATTERNS:
+                matched = next((kw for kw in pattern["keywords"] if kw in text), None)
+                if matched:
+                    flags.append({
+                        "signal_type": pattern["signal_type"],
+                        "category": pattern["category"],
+                        "matched_keyword": matched,
+                        "headline": headline,
+                        "url": article.get("url", ""),
+                        "published_date": article.get("published_date", ""),
+                    })
+
+        if flags:
+            logger.info(f"Detected {len(flags)} special situation signal(s) in headlines")
+
+        return flags
     
     def _identify_risks(self, ticker, market_data, fundamentals, news_data, company_info, macro_data) -> List[Dict[str, Any]]:
         """Identify risks from all data sources"""

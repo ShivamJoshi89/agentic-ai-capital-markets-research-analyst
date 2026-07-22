@@ -10,6 +10,7 @@ from .macro_agent import MacroAgent
 from .risk_agent import RiskAgent
 from .report_agent import ReportAgent
 from .critic_agent import CriticAgent
+from .peer_agent import PeerComparisonAgent
 
 __all__ = [
     "MarketDataAgent",
@@ -20,4 +21,5 @@ __all__ = [
     "RiskAgent",
     "ReportAgent",
     "CriticAgent",
+    "PeerComparisonAgent",
 ]
