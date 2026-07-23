@@ -75,6 +75,17 @@ class PeerComparisonAgent:
     MARKET_CAP_BRACKET_RELAXED: Tuple[float, float] = (0.01, 100)
     REVENUE_BRACKET: Tuple[float, float] = (0.05, 20)
 
+    # Mega-cap fallback: for companies this large, a narrow industryKey bucket
+    # is often dominated by penny stocks (e.g. AAPL's "consumer-electronics"
+    # industry is ~99.96% AAPL itself, with Sonos/Turtle Beach/OTC shells
+    # making up the rest), and Layer 1's own cap bracket already does the
+    # real filtering work. So above this threshold, also source the
+    # Technology sector ETF's holdings unconditionally and let them qualify
+    # on market-cap proximity alone, regardless of industryKey/sector match.
+    MEGA_CAP_THRESHOLD = 500_000_000_000  # $500B
+    MEGA_CAP_FALLBACK_ETF = "XLK"
+    MEGA_CAP_SCORE = 2  # between a sector-only match (1) and an exact industryKey match (3)
+
     def __init__(self):
         """Initialize the Peer Comparison Agent"""
         self.name = "Peer Comparison Agent"
@@ -117,7 +128,24 @@ class PeerComparisonAgent:
                     "error": f"No market cap data for {ticker} - cannot size a peer bracket"
                 }
 
-            candidate_symbols = self._source_candidates(ticker, sector, industry_key)
+            if not sector and not industry_key:
+                # Sector/industryKey missing almost always means yfinance
+                # returned a partial `info` payload for this call (transient
+                # API hiccup), not that the company genuinely has no
+                # classification. Fail cleanly here rather than let the
+                # mega-cap ETF fallback silently stand in as the only
+                # candidate source - that would return, say, semiconductor
+                # names as "peers" for a bank with high confidence and no
+                # indication anything was actually wrong.
+                return {
+                    "ticker": ticker,
+                    "success": False,
+                    "error": f"Missing sector/industry classification for {ticker} - retry likely needed"
+                }
+
+            candidate_symbols, mega_cap_symbols = self._source_candidates(
+                ticker, sector, industry_key, target_market_cap
+            )
             if not candidate_symbols:
                 return {
                     "ticker": ticker,
@@ -129,7 +157,7 @@ class PeerComparisonAgent:
 
             peers = self._select_peers(
                 target_info, candidate_infos, sector, industry_key,
-                target_market_cap, target_revenue, self.MARKET_CAP_BRACKET
+                target_market_cap, target_revenue, self.MARKET_CAP_BRACKET, mega_cap_symbols
             )
 
             if len(peers) < self.MIN_PEERS_REQUIRED:
@@ -139,7 +167,7 @@ class PeerComparisonAgent:
                 )
                 peers = self._select_peers(
                     target_info, candidate_infos, sector, industry_key,
-                    target_market_cap, target_revenue, self.MARKET_CAP_BRACKET_RELAXED
+                    target_market_cap, target_revenue, self.MARKET_CAP_BRACKET_RELAXED, mega_cap_symbols
                 )
 
             if not peers:
@@ -169,26 +197,37 @@ class PeerComparisonAgent:
                 "error": str(e)
             }
 
-    def _source_candidates(self, ticker: str, sector: str, industry_key: Optional[str]) -> List[str]:
-        """Union of two live candidate pools; neither is a fixed peer list.
+    def _source_candidates(
+        self, ticker: str, sector: str, industry_key: Optional[str], target_market_cap: Optional[float]
+    ) -> Tuple[List[str], set]:
+        """Union of live candidate pools; none is a fixed peer list.
 
-        Sourcing both (rather than treating industryKey as an error-only
-        fallback) matters in practice: a sector ETF's top-10 holdings are
-        cap-weighted and dominated by mega-caps, so for anything that isn't
-        itself a top-10-by-weight name (e.g. a $10-20B mid-cap), the ETF
-        pool alone would never surface a same-industry peer.
+        Sourcing the sector ETF and the industry pool together (rather than
+        treating industryKey as an error-only fallback) matters in practice:
+        a sector ETF's top-10 holdings are cap-weighted and dominated by
+        mega-caps, so for anything that isn't itself a top-10-by-weight name
+        (e.g. a $10-20B mid-cap), the ETF pool alone would never surface a
+        same-industry peer.
+
+        For mega-caps (> MEGA_CAP_THRESHOLD) a third pool is added: the
+        Technology sector ETF's holdings, unconditionally, regardless of the
+        target's own sector or industryKey. This exists because a narrow
+        industryKey bucket can be dominated by penny stocks that coincidentally
+        share the same classification (AAPL's "consumer-electronics" industry
+        is ~99.96% AAPL itself; the remainder is Sonos, Turtle Beach, and OTC
+        shells with market caps of a few million dollars - none of which come
+        close to surviving the market-cap bracket anyway). Returns the
+        candidate list plus the subset of symbols sourced via this mega-cap
+        fallback, so the caller can score them without requiring a sector or
+        industryKey match.
         """
 
         symbols: List[str] = []
+        mega_cap_symbols: set = set()
 
         etf_symbol = SECTOR_ETF_MAP.get(sector)
         if etf_symbol:
-            try:
-                holdings = yf.Ticker(etf_symbol).funds_data.top_holdings
-                if holdings is not None and not holdings.empty:
-                    symbols.extend(holdings.index.tolist())
-            except Exception as e:
-                logger.warning(f"Sector ETF lookup ({etf_symbol}) failed for {ticker}: {str(e)}")
+            symbols.extend(self._fetch_etf_holdings(etf_symbol, ticker))
 
         if industry_key:
             try:
@@ -197,6 +236,11 @@ class PeerComparisonAgent:
                     symbols.extend(top.index.tolist())
             except Exception as e:
                 logger.warning(f"Industry lookup ({industry_key}) failed for {ticker}: {str(e)}")
+
+        if target_market_cap and target_market_cap > self.MEGA_CAP_THRESHOLD:
+            mega_holdings = self._fetch_etf_holdings(self.MEGA_CAP_FALLBACK_ETF, ticker)
+            symbols.extend(mega_holdings)
+            mega_cap_symbols.update(sym.upper() for sym in mega_holdings)
 
         # De-dupe (first-seen order), drop the target itself
         seen = set()
@@ -208,7 +252,22 @@ class PeerComparisonAgent:
             seen.add(sym_upper)
             candidates.append(sym_upper)
 
-        return candidates
+        mega_cap_symbols.discard(ticker.upper())
+        return candidates, mega_cap_symbols
+
+    @staticmethod
+    def _fetch_etf_holdings(etf_symbol: str, context_ticker: str) -> List[str]:
+        """Fetch an ETF's top holdings (Yahoo's fund-profile endpoint caps
+        this at 10 constituents server-side; there's no way to request more
+        through this data source)."""
+
+        try:
+            holdings = yf.Ticker(etf_symbol).funds_data.top_holdings
+            if holdings is not None and not holdings.empty:
+                return holdings.index.tolist()
+        except Exception as e:
+            logger.warning(f"ETF lookup ({etf_symbol}) failed for {context_ticker}: {str(e)}")
+        return []
 
     @staticmethod
     def _fetch_candidate_infos(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
@@ -235,11 +294,21 @@ class PeerComparisonAgent:
         target_market_cap: float,
         target_revenue: Optional[float],
         cap_bracket: Tuple[float, float],
+        mega_cap_symbols: Optional[set] = None,
     ) -> List[Dict[str, Any]]:
         """Apply the market-cap bracket (Layer 1) and revenue-scale filter
         (Layer 3), score by industry match (Layer 2), and return the top
-        MAX_PEERS ranked by score then by closeness in market cap."""
+        MAX_PEERS ranked by score then by closeness in market cap.
 
+        mega_cap_symbols are candidates sourced via the mega-cap ETF
+        fallback: they qualify on market-cap proximity alone (MEGA_CAP_SCORE)
+        even with no sector or industryKey match, since that fallback exists
+        specifically to bridge yfinance's sector taxonomy (e.g. AAPL is
+        "Technology" while Google/Meta are "Communication Services" - real
+        mega-cap peers that a same-sector-only rule would otherwise exclude).
+        """
+
+        mega_cap_symbols = mega_cap_symbols or set()
         cap_min = target_market_cap * cap_bracket[0]
         cap_max = target_market_cap * cap_bracket[1]
         revenue_min = target_revenue * self.REVENUE_BRACKET[0] if target_revenue else None
@@ -262,6 +331,8 @@ class PeerComparisonAgent:
                 score = 3
             elif sector and info.get("sector") == sector:
                 score = 1
+            elif symbol in mega_cap_symbols:
+                score = self.MEGA_CAP_SCORE
 
             if score == 0:
                 continue
