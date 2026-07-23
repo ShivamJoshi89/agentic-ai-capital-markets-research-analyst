@@ -1,12 +1,18 @@
 """
 Peer Comparison Agent
 Identifies comparable companies and collects key metrics for relative analysis.
+
+Peer discovery is fully dynamic: every bracket and filter scales off the
+target company's own market cap and revenue, and candidates are sourced live
+from yfinance on every call. There is no hardcoded peer list and no fixed
+dollar threshold, so the same logic works for a micro-cap and a mega-cap
+alike.
 """
 
 import logging
-from typing import Dict, Any, List, Optional
 import sys
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 import yfinance as yf
 
@@ -15,39 +21,21 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 logger = logging.getLogger(__name__)
 
-# Curated peer sets for common large-cap tickers. yfinance's industry
-# constituent lookup ranks by index weight within a narrow industry bucket
-# (e.g. "Consumer Electronics"), which surfaces tiny, largely irrelevant
-# names (Sonos, Turtle Beach) ahead of the mega-cap peers an analyst would
-# actually compare against. These take priority over that lookup.
-CURATED_PEERS = {
-    "AAPL": ["MSFT", "GOOGL", "005930.KS", "AVGO"],   # Microsoft, Alphabet, Samsung, Broadcom
-    "MSFT": ["AAPL", "GOOGL", "AMZN", "ORCL"],
-    "GOOGL": ["MSFT", "META", "AMZN", "AAPL"],
-    "AMZN": ["MSFT", "GOOGL", "WMT", "BABA"],
-    "NVDA": ["AMD", "INTC", "AVGO", "TSM"],
-    "META": ["GOOGL", "SNAP", "PINS", "MSFT"],
-    "TSLA": ["GM", "F", "RIVN", "TM"],
-    "JPM": ["BAC", "WFC", "C", "GS"],
-    "GS": ["MS", "JPM", "C", "BAC"],
-    "MS": ["GS", "JPM", "C", "BAC"],
-    "BAC": ["JPM", "WFC", "C", "GS"],
-    "WFC": ["JPM", "BAC", "C", "USB"],
-}
-
-# Fallback peers by sector, used when yfinance industry lookup fails
-SECTOR_FALLBACK_PEERS = {
-    "Financial Services": ["JPM", "BAC", "WFC", "C", "GS"],
-    "Technology": ["AAPL", "MSFT", "NVDA", "GOOGL", "AVGO"],
-    "Healthcare": ["LLY", "UNH", "JNJ", "ABBV", "MRK"],
-    "Consumer Cyclical": ["AMZN", "TSLA", "HD", "MCD", "NKE"],
-    "Consumer Defensive": ["WMT", "PG", "KO", "PEP", "COST"],
-    "Energy": ["XOM", "CVX", "COP", "SLB", "EOG"],
-    "Industrials": ["CAT", "GE", "HON", "UNP", "RTX"],
-    "Communication Services": ["GOOGL", "META", "NFLX", "DIS", "TMUS"],
-    "Utilities": ["NEE", "SO", "DUK", "CEG", "AEP"],
-    "Real Estate": ["PLD", "AMT", "EQIX", "SPG", "O"],
-    "Basic Materials": ["LIN", "SHW", "APD", "ECL", "FCX"],
+# Sector -> SPDR sector ETF. This is a fixed taxonomy mapping (11 sectors to
+# their standard sector ETF), not a peer list - the ETF's actual holdings are
+# fetched fresh from yfinance every run and change as the market does.
+SECTOR_ETF_MAP = {
+    "Technology": "XLK",
+    "Financial Services": "XLF",
+    "Healthcare": "XLV",
+    "Energy": "XLE",
+    "Consumer Cyclical": "XLY",
+    "Consumer Defensive": "XLP",
+    "Industrials": "XLI",
+    "Basic Materials": "XLB",
+    "Utilities": "XLU",
+    "Real Estate": "XLRE",
+    "Communication Services": "XLC",
 }
 
 
@@ -55,15 +43,37 @@ class PeerComparisonAgent:
     """
     Responsible for comparable companies (comps) analysis.
 
-    Responsibilities:
-    - Identify 3-4 peer companies in the same industry/sector
-    - Fetch key comparison metrics for target and peers
-    - Provide raw numeric values so the UI can rank and highlight
+    Three-layer dynamic filter, all scaled off the target company itself:
+
+    Layer 1 - Market cap bracket: candidates must fall within [0.1x, 10x]
+              of the target's market cap (relaxed to [0.01x, 100x] if that
+              band yields fewer than 2 peers).
+    Layer 2 - Industry match score: +3 for an exact industryKey match,
+              +1 for a same-sector match. Used to rank candidates; a
+              same-industry small-cap will outrank a same-sector mega-cap.
+    Layer 3 - Revenue scale filter: candidates must fall within
+              [0.05x, 20x] of the target's revenue, screening out shell
+              companies, SPACs, and holding companies that only
+              coincidentally share a market cap or industry classification.
+
+    Candidates are sourced from two live pools, unioned together:
+      - the target sector's SPDR ETF top holdings (breadth - surfaces the
+        mega-cap names that dominate the sector), and
+      - yfinance's industryKey constituents (precision - the ETF pool is
+        cap-weighted and top-10-only, so it cannot represent a narrow
+        industry or a company that isn't a top-10-by-weight sector name;
+        the industry pool is what actually finds peers for a mid-cap like
+        a footwear or regional-bank name).
+    Both are pure lookups against live yfinance data - neither is a fixed
+    list of tickers.
     """
 
     MAX_PEERS = 4
-    MIN_PEERS = 3
-    MIN_PEER_MARKET_CAP = 1_000_000_000  # exclude sub-$1B names from lookup-based peers
+    MIN_PEERS_REQUIRED = 2  # below this, relax the market cap bracket and retry
+
+    MARKET_CAP_BRACKET: Tuple[float, float] = (0.1, 10)
+    MARKET_CAP_BRACKET_RELAXED: Tuple[float, float] = (0.01, 100)
+    REVENUE_BRACKET: Tuple[float, float] = (0.05, 20)
 
     def __init__(self):
         """Initialize the Peer Comparison Agent"""
@@ -94,20 +104,43 @@ class PeerComparisonAgent:
                     "error": f"Could not fetch company info for {ticker}"
                 }
 
+            target_market_cap = target_info.get("marketCap")
+            target_revenue = target_info.get("totalRevenue")
             sector = target_info.get("sector", "")
             industry = target_info.get("industry", "")
+            industry_key = target_info.get("industryKey")
 
-            candidates = self._find_peer_candidates(ticker, target_info)
-
-            if not candidates:
+            if not target_market_cap:
                 return {
                     "ticker": ticker,
                     "success": False,
-                    "error": f"Could not identify peer companies for {ticker}"
+                    "error": f"No market cap data for {ticker} - cannot size a peer bracket"
                 }
 
-            target_row = self._extract_metrics(ticker, target_info)
-            peers = self._collect_peer_metrics(candidates, target_row)
+            candidate_symbols = self._source_candidates(ticker, sector, industry_key)
+            if not candidate_symbols:
+                return {
+                    "ticker": ticker,
+                    "success": False,
+                    "error": f"Could not identify peer candidates for {ticker}"
+                }
+
+            candidate_infos = self._fetch_candidate_infos(candidate_symbols)
+
+            peers = self._select_peers(
+                target_info, candidate_infos, sector, industry_key,
+                target_market_cap, target_revenue, self.MARKET_CAP_BRACKET
+            )
+
+            if len(peers) < self.MIN_PEERS_REQUIRED:
+                logger.info(
+                    f"Only {len(peers)} peer(s) for {ticker} within "
+                    f"{self.MARKET_CAP_BRACKET}x cap bracket; relaxing to {self.MARKET_CAP_BRACKET_RELAXED}x"
+                )
+                peers = self._select_peers(
+                    target_info, candidate_infos, sector, industry_key,
+                    target_market_cap, target_revenue, self.MARKET_CAP_BRACKET_RELAXED
+                )
 
             if not peers:
                 return {
@@ -116,8 +149,7 @@ class PeerComparisonAgent:
                     "error": "No peer metrics could be fetched"
                 }
 
-            if len(peers) < self.MIN_PEERS:
-                logger.warning(f"Only {len(peers)} peers found for {ticker} (wanted {self.MIN_PEERS}-{self.MAX_PEERS})")
+            target_row = self._extract_metrics(ticker, target_info)
 
             return {
                 "ticker": ticker,
@@ -137,52 +169,114 @@ class PeerComparisonAgent:
                 "error": str(e)
             }
 
-    def _find_peer_candidates(self, ticker: str, target_info: Dict[str, Any]) -> List[str]:
-        """Find candidate peer tickers, largest industry players first"""
+    def _source_candidates(self, ticker: str, sector: str, industry_key: Optional[str]) -> List[str]:
+        """Union of two live candidate pools; neither is a fixed peer list.
 
-        # Preferred: curated large-cap peer set, hand-picked for relevance
-        curated = CURATED_PEERS.get(ticker.upper())
-        if curated:
-            return curated
+        Sourcing both (rather than treating industryKey as an error-only
+        fallback) matters in practice: a sector ETF's top-10 holdings are
+        cap-weighted and dominated by mega-caps, so for anything that isn't
+        itself a top-10-by-weight name (e.g. a $10-20B mid-cap), the ETF
+        pool alone would never surface a same-industry peer.
+        """
 
-        # Next: yfinance industry constituents (dynamic, market-weight ordered)
-        industry_key = target_info.get("industryKey")
+        symbols: List[str] = []
+
+        etf_symbol = SECTOR_ETF_MAP.get(sector)
+        if etf_symbol:
+            try:
+                holdings = yf.Ticker(etf_symbol).funds_data.top_holdings
+                if holdings is not None and not holdings.empty:
+                    symbols.extend(holdings.index.tolist())
+            except Exception as e:
+                logger.warning(f"Sector ETF lookup ({etf_symbol}) failed for {ticker}: {str(e)}")
+
         if industry_key:
             try:
                 top = yf.Industry(industry_key).top_companies
                 if top is not None and not top.empty:
-                    return [sym for sym in top.index.tolist() if sym.upper() != ticker.upper()]
+                    symbols.extend(top.index.tolist())
             except Exception as e:
-                logger.warning(f"Industry peer lookup failed for {ticker}: {str(e)}")
+                logger.warning(f"Industry lookup ({industry_key}) failed for {ticker}: {str(e)}")
 
-        # Fallback: curated large caps for the sector
-        sector = target_info.get("sector", "")
-        fallback = SECTOR_FALLBACK_PEERS.get(sector, [])
-        return [sym for sym in fallback if sym.upper() != ticker.upper()]
+        # De-dupe (first-seen order), drop the target itself
+        seen = set()
+        candidates = []
+        for sym in symbols:
+            sym_upper = sym.upper()
+            if sym_upper == ticker.upper() or sym_upper in seen:
+                continue
+            seen.add(sym_upper)
+            candidates.append(sym_upper)
 
-    def _collect_peer_metrics(self, candidates: List[str], target_row: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Fetch metrics for candidates until MAX_PEERS collected, skipping dual listings"""
+        return candidates
 
-        peers = []
-        seen_names = {self._normalize_name(target_row.get("company"))}
+    @staticmethod
+    def _fetch_candidate_infos(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Fetch yfinance info for each candidate once, so both the normal
+        and relaxed selection passes can reuse it without re-fetching."""
 
-        for symbol in candidates:
-            if len(peers) >= self.MAX_PEERS:
-                break
-
+        infos = {}
+        for symbol in symbols:
             try:
                 info = yf.Ticker(symbol).info
             except Exception as e:
-                logger.warning(f"Could not fetch peer info for {symbol}: {str(e)}")
+                logger.warning(f"Could not fetch candidate info for {symbol}: {str(e)}")
+                continue
+            if info and (info.get("shortName") or info.get("longName")):
+                infos[symbol] = info
+        return infos
+
+    def _select_peers(
+        self,
+        target_info: Dict[str, Any],
+        candidate_infos: Dict[str, Dict[str, Any]],
+        sector: str,
+        industry_key: Optional[str],
+        target_market_cap: float,
+        target_revenue: Optional[float],
+        cap_bracket: Tuple[float, float],
+    ) -> List[Dict[str, Any]]:
+        """Apply the market-cap bracket (Layer 1) and revenue-scale filter
+        (Layer 3), score by industry match (Layer 2), and return the top
+        MAX_PEERS ranked by score then by closeness in market cap."""
+
+        cap_min = target_market_cap * cap_bracket[0]
+        cap_max = target_market_cap * cap_bracket[1]
+        revenue_min = target_revenue * self.REVENUE_BRACKET[0] if target_revenue else None
+        revenue_max = target_revenue * self.REVENUE_BRACKET[1] if target_revenue else None
+
+        target_name_key = self._normalize_name(target_info.get("shortName") or target_info.get("longName"))
+
+        scored = []
+        for symbol, info in candidate_infos.items():
+            market_cap = info.get("marketCap")
+            if market_cap is None or not (cap_min <= market_cap <= cap_max):
                 continue
 
-            # Filter out tiny/irrelevant names surfaced by the industry lookup.
-            # Skip only when market cap is known and below the floor - missing
-            # data (common for some foreign primaries) shouldn't disqualify a peer.
-            market_cap = info.get("marketCap")
-            if market_cap is not None and market_cap < self.MIN_PEER_MARKET_CAP:
-                logger.info(f"Excluding {symbol} from peers: market cap below $1B floor")
+            revenue = info.get("totalRevenue")
+            if revenue_min is not None and revenue is not None and not (revenue_min <= revenue <= revenue_max):
                 continue
+
+            score = 0
+            if industry_key and info.get("industryKey") == industry_key:
+                score = 3
+            elif sector and info.get("sector") == sector:
+                score = 1
+
+            if score == 0:
+                continue
+
+            scored.append((score, market_cap, symbol, info))
+
+        # Rank by industry match first, then by proximity in market cap
+        scored.sort(key=lambda item: (-item[0], abs(item[1] - target_market_cap)))
+
+        peers = []
+        seen_names = {target_name_key}
+
+        for score, market_cap, symbol, info in scored:
+            if len(peers) >= self.MAX_PEERS:
+                break
 
             row = self._extract_metrics(symbol, info)
             if not row.get("company"):
