@@ -15,6 +15,26 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 logger = logging.getLogger(__name__)
 
+# Curated peer sets for common large-cap tickers. yfinance's industry
+# constituent lookup ranks by index weight within a narrow industry bucket
+# (e.g. "Consumer Electronics"), which surfaces tiny, largely irrelevant
+# names (Sonos, Turtle Beach) ahead of the mega-cap peers an analyst would
+# actually compare against. These take priority over that lookup.
+CURATED_PEERS = {
+    "AAPL": ["MSFT", "GOOGL", "005930.KS", "AVGO"],   # Microsoft, Alphabet, Samsung, Broadcom
+    "MSFT": ["AAPL", "GOOGL", "AMZN", "ORCL"],
+    "GOOGL": ["MSFT", "META", "AMZN", "AAPL"],
+    "AMZN": ["MSFT", "GOOGL", "WMT", "BABA"],
+    "NVDA": ["AMD", "INTC", "AVGO", "TSM"],
+    "META": ["GOOGL", "SNAP", "PINS", "MSFT"],
+    "TSLA": ["GM", "F", "RIVN", "TM"],
+    "JPM": ["BAC", "WFC", "C", "GS"],
+    "GS": ["MS", "JPM", "C", "BAC"],
+    "MS": ["GS", "JPM", "C", "BAC"],
+    "BAC": ["JPM", "WFC", "C", "GS"],
+    "WFC": ["JPM", "BAC", "C", "USB"],
+}
+
 # Fallback peers by sector, used when yfinance industry lookup fails
 SECTOR_FALLBACK_PEERS = {
     "Financial Services": ["JPM", "BAC", "WFC", "C", "GS"],
@@ -43,6 +63,7 @@ class PeerComparisonAgent:
 
     MAX_PEERS = 4
     MIN_PEERS = 3
+    MIN_PEER_MARKET_CAP = 1_000_000_000  # exclude sub-$1B names from lookup-based peers
 
     def __init__(self):
         """Initialize the Peer Comparison Agent"""
@@ -119,7 +140,12 @@ class PeerComparisonAgent:
     def _find_peer_candidates(self, ticker: str, target_info: Dict[str, Any]) -> List[str]:
         """Find candidate peer tickers, largest industry players first"""
 
-        # Preferred: yfinance industry constituents (dynamic, market-weight ordered)
+        # Preferred: curated large-cap peer set, hand-picked for relevance
+        curated = CURATED_PEERS.get(ticker.upper())
+        if curated:
+            return curated
+
+        # Next: yfinance industry constituents (dynamic, market-weight ordered)
         industry_key = target_info.get("industryKey")
         if industry_key:
             try:
@@ -148,6 +174,14 @@ class PeerComparisonAgent:
                 info = yf.Ticker(symbol).info
             except Exception as e:
                 logger.warning(f"Could not fetch peer info for {symbol}: {str(e)}")
+                continue
+
+            # Filter out tiny/irrelevant names surfaced by the industry lookup.
+            # Skip only when market cap is known and below the floor - missing
+            # data (common for some foreign primaries) shouldn't disqualify a peer.
+            market_cap = info.get("marketCap")
+            if market_cap is not None and market_cap < self.MIN_PEER_MARKET_CAP:
+                logger.info(f"Excluding {symbol} from peers: market cap below $1B floor")
                 continue
 
             row = self._extract_metrics(symbol, info)
