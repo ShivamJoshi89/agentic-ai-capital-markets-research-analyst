@@ -79,11 +79,15 @@ class PeerComparisonAgent:
     # is often dominated by penny stocks (e.g. AAPL's "consumer-electronics"
     # industry is ~99.96% AAPL itself, with Sonos/Turtle Beach/OTC shells
     # making up the rest), and Layer 1's own cap bracket already does the
-    # real filtering work. So above this threshold, also source the
-    # Technology sector ETF's holdings unconditionally and let them qualify
-    # on market-cap proximity alone, regardless of industryKey/sector match.
+    # real filtering work. So above this threshold, also source Technology
+    # AND Communication Services sector ETF holdings unconditionally and let
+    # them qualify on market-cap proximity alone, regardless of
+    # industryKey/sector match. Both ETFs matter: yfinance splits "big tech"
+    # across two sectors (AAPL/MSFT/NVDA are Technology; GOOGL/META are
+    # Communication Services), so relying on Technology alone can never
+    # surface Google or Meta as peers for a mega-cap like Apple.
     MEGA_CAP_THRESHOLD = 500_000_000_000  # $500B
-    MEGA_CAP_FALLBACK_ETF = "XLK"
+    MEGA_CAP_FALLBACK_ETFS = ("XLK", "XLC")
     MEGA_CAP_SCORE = 2  # between a sector-only match (1) and an exact industryKey match (3)
 
     def __init__(self):
@@ -209,17 +213,20 @@ class PeerComparisonAgent:
         (e.g. a $10-20B mid-cap), the ETF pool alone would never surface a
         same-industry peer.
 
-        For mega-caps (> MEGA_CAP_THRESHOLD) a third pool is added: the
-        Technology sector ETF's holdings, unconditionally, regardless of the
-        target's own sector or industryKey. This exists because a narrow
-        industryKey bucket can be dominated by penny stocks that coincidentally
-        share the same classification (AAPL's "consumer-electronics" industry
-        is ~99.96% AAPL itself; the remainder is Sonos, Turtle Beach, and OTC
-        shells with market caps of a few million dollars - none of which come
-        close to surviving the market-cap bracket anyway). Returns the
-        candidate list plus the subset of symbols sourced via this mega-cap
-        fallback, so the caller can score them without requiring a sector or
-        industryKey match.
+        For mega-caps (> MEGA_CAP_THRESHOLD) additional pools are unioned in:
+        the Technology and Communication Services sector ETFs' holdings,
+        unconditionally, regardless of the target's own sector or
+        industryKey. This exists because a narrow industryKey bucket can be
+        dominated by penny stocks that coincidentally share the same
+        classification (AAPL's "consumer-electronics" industry is ~99.96%
+        AAPL itself; the remainder is Sonos, Turtle Beach, and OTC shells
+        with market caps of a few million dollars - none of which come close
+        to surviving the market-cap bracket anyway), and because "big tech"
+        peers span two different yfinance sectors that a same-sector-only
+        rule would otherwise never bridge. Returns the candidate list plus
+        the subset of symbols sourced via this mega-cap fallback, so the
+        caller can score them without requiring a sector or industryKey
+        match.
         """
 
         symbols: List[str] = []
@@ -238,9 +245,10 @@ class PeerComparisonAgent:
                 logger.warning(f"Industry lookup ({industry_key}) failed for {ticker}: {str(e)}")
 
         if target_market_cap and target_market_cap > self.MEGA_CAP_THRESHOLD:
-            mega_holdings = self._fetch_etf_holdings(self.MEGA_CAP_FALLBACK_ETF, ticker)
-            symbols.extend(mega_holdings)
-            mega_cap_symbols.update(sym.upper() for sym in mega_holdings)
+            for etf in self.MEGA_CAP_FALLBACK_ETFS:
+                mega_holdings = self._fetch_etf_holdings(etf, ticker)
+                symbols.extend(mega_holdings)
+                mega_cap_symbols.update(sym.upper() for sym in mega_holdings)
 
         # De-dupe (first-seen order), drop the target itself
         seen = set()
@@ -301,11 +309,12 @@ class PeerComparisonAgent:
         MAX_PEERS ranked by score then by closeness in market cap.
 
         mega_cap_symbols are candidates sourced via the mega-cap ETF
-        fallback: they qualify on market-cap proximity alone (MEGA_CAP_SCORE)
-        even with no sector or industryKey match, since that fallback exists
-        specifically to bridge yfinance's sector taxonomy (e.g. AAPL is
-        "Technology" while Google/Meta are "Communication Services" - real
-        mega-cap peers that a same-sector-only rule would otherwise exclude).
+        fallback (Technology + Communication Services): they qualify on
+        market-cap proximity alone (MEGA_CAP_SCORE) even with no sector or
+        industryKey match, since that fallback exists specifically to bridge
+        yfinance's sector taxonomy (e.g. AAPL is "Technology" while
+        Google/Meta are "Communication Services" - real mega-cap peers that
+        a same-sector-only rule would otherwise exclude).
         """
 
         mega_cap_symbols = mega_cap_symbols or set()
