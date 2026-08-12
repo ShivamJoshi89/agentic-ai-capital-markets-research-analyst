@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import {
   TrendingUp,
   DollarSign,
+  Landmark,
   Newspaper,
   Globe,
   Building2,
@@ -15,11 +16,12 @@ import {
 // the real pipeline; the report/LLM stage is the longest)
 const AGENTS = [
   { name: "Market Data", icon: TrendingUp, done: 5 },
-  { name: "Fundamentals", icon: DollarSign, done: 11 },
-  { name: "News", icon: Newspaper, done: 16 },
-  { name: "Macro", icon: Globe, done: 22 },
-  { name: "Peers", icon: Building2, done: 30 },
-  { name: "Risk", icon: AlertTriangle, done: 35 },
+  { name: "Fundamentals", icon: DollarSign, done: 9 },
+  { name: "Financing", icon: Landmark, done: 13 },
+  { name: "News", icon: Newspaper, done: 18 },
+  { name: "Macro", icon: Globe, done: 24 },
+  { name: "Peers", icon: Building2, done: 31 },
+  { name: "Risk", icon: AlertTriangle, done: 36 },
   { name: "Report", icon: FileText, done: 50 },
 ];
 
@@ -48,7 +50,7 @@ export default function LoadingPipeline() {
     >
       <div className="text-gold font-bold text-xl mb-1">Running Multi-Agent Analysis</div>
       <div className="text-gray-400 text-sm mb-10">
-        Seven specialized agents are building your research report
+        Eight specialized agents are building your research report
       </div>
 
       <div className="flex items-center gap-2 flex-wrap justify-center px-6 max-w-4xl">

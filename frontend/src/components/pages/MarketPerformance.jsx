@@ -14,7 +14,13 @@ export default function MarketPerformance({ data }) {
         <MetricCard label="1-Month Return" value={metrics.one_month_return} suffix="%" signed />
         <MetricCard label="3-Month Return" value={metrics.three_month_return} suffix="%" signed />
         <MetricCard label="6-Month Return" value={metrics.six_month_return} suffix="%" signed />
-        <MetricCard label="YTD Return" value={metrics.ytd_return} suffix="%" signed />
+        <MetricCard
+          label={metrics.ytd_basis === "trailing_since_series_start" ? "Return (Since Start)" : "YTD Return"}
+          value={metrics.ytd_return}
+          suffix="%"
+          signed
+          sub={metrics.ytd_basis === "trailing_since_series_start" ? "No calendar-YTD base available yet" : null}
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">

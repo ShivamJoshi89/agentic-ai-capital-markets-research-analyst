@@ -9,6 +9,7 @@ import {
   Globe,
   AlertTriangle,
   FileText,
+  Info,
   RotateCcw,
   Search,
   X,
@@ -23,6 +24,7 @@ import NewsSentiment from "../components/pages/NewsSentiment.jsx";
 import MacroEnvironment from "../components/pages/MacroEnvironment.jsx";
 import RiskAnalysis from "../components/pages/RiskAnalysis.jsx";
 import ResearchMemo from "../components/pages/ResearchMemo.jsx";
+import About from "../components/pages/About.jsx";
 
 const NAV = [
   { id: "overview", label: "Overview", icon: LayoutDashboard, component: Overview },
@@ -33,6 +35,7 @@ const NAV = [
   { id: "macro", label: "Macro Environment", icon: Globe, component: MacroEnvironment },
   { id: "risk", label: "Risk Analysis", icon: AlertTriangle, component: RiskAnalysis },
   { id: "memo", label: "Research Memo", icon: FileText, component: ResearchMemo },
+  { id: "about", label: "About", icon: Info, component: About },
 ];
 
 export default function Dashboard({ data, onReset, onChangeTicker, error, busy }) {

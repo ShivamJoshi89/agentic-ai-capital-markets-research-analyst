@@ -27,7 +27,13 @@ export default function Overview({ data }) {
       {/* Hero metrics */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard label="Current Price" value={metrics.latest_price} prefix="$" />
-        <MetricCard label="YTD Return" value={metrics.ytd_return} suffix="%" signed />
+        <MetricCard
+          label={metrics.ytd_basis === "trailing_since_series_start" ? "Return (Since Start)" : "YTD Return"}
+          value={metrics.ytd_return}
+          suffix="%"
+          signed
+          sub={metrics.ytd_basis === "trailing_since_series_start" ? "No calendar-YTD base available yet" : null}
+        />
         <MetricCard
           label="Market Cap"
           value={marketCap !== null ? marketCap / 1e9 : null}

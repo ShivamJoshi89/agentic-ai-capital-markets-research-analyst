@@ -17,8 +17,8 @@ import {
 } from "lucide-react";
 
 const FEATURES = [
-  { icon: Bot, title: "7 AI Agents", sub: "Specialized analysts working in concert" },
-  { icon: Database, title: "6 Data Sources", sub: "yfinance, FRED, Google News, SEC EDGAR, NewsAPI, OpenAI" },
+  { icon: Bot, title: "8 AI Agents", sub: "Specialized analysts working in concert" },
+  { icon: Database, title: "5 Data Sources", sub: "yfinance, FRED, Google News, SEC EDGAR, OpenAI" },
   { icon: Zap, title: "Real-Time FRED Data", sub: "Live fed funds, treasury, CPI, unemployment, VIX" },
   { icon: Landmark, title: "Wall Street Methodology", sub: "Comps, earnings quality, bull/base/bear cases" },
 ];
@@ -26,6 +26,7 @@ const FEATURES = [
 const PIPELINE = [
   { icon: TrendingUp, name: "Market Data" },
   { icon: DollarSign, name: "Fundamentals" },
+  { icon: Landmark, name: "Financing" },
   { icon: Newspaper, name: "News" },
   { icon: Globe, name: "Macro" },
   { icon: Building2, name: "Peers" },
