@@ -23,6 +23,14 @@ class Config:
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     NEWS_API_KEY = os.getenv("NEWS_API_KEY")
     FRED_API_KEY = os.getenv("FRED_API_KEY")
+
+    # SEC EDGAR requires a descriptive User-Agent (name + contact email) on
+    # every request - see https://www.sec.gov/os/webmaster-faq#developers.
+    # No key needed, but requests without one get throttled/blocked.
+    SEC_USER_AGENT = os.getenv(
+        "SEC_USER_AGENT",
+        "Agentic Capital Markets Research Analyst (contact@example.com)"
+    )
     
     # Settings
     APP_ENV = os.getenv("APP_ENV", "development")

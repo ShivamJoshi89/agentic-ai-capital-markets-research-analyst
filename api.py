@@ -1,10 +1,8 @@
 """
 FastAPI backend for the Agentic AI Capital Markets Research Analyst.
 
-Exposes the existing agent pipeline as REST endpoints for external frontends
-(e.g. React). Runs alongside the Streamlit app without modifying it:
+Exposes the agent pipeline as REST endpoints for the React frontend:
 
-    streamlit run app.py                    # UI on :8501
     python api.py                           # API on :8000
     (or: uvicorn api:app --port 8000)
 """
@@ -21,7 +19,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# Add src to path (same convention as app.py)
+# Add src to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from agents.market_data_agent import MarketDataAgent
@@ -31,6 +29,7 @@ from agents.macro_agent import MacroAgent
 from agents.risk_agent import RiskAgent
 from agents.report_agent import ReportAgent
 from agents.peer_agent import PeerComparisonAgent
+from agents.financing_risk_agent import FinancingRiskAgent
 from data_sources.yfinance_client import YFinanceClient
 from utils.helpers import validate_ticker
 from utils.logger import setup_logger
@@ -107,7 +106,6 @@ def health():
 def analyze(request: AnalyzeRequest):
     """Run the full agent pipeline for a ticker and return all results.
 
-    Mirrors the stage order of the Streamlit app's fetch_analysis().
     Synchronous by design - the pipeline takes ~30-60s including the LLM memo.
     """
     ticker = request.ticker.upper().strip()
@@ -137,6 +135,16 @@ def analyze(request: AnalyzeRequest):
 
         fundamentals_data = FinancialsAgent().run(ticker)
 
+        financing_data = FinancingRiskAgent().run(
+            ticker, fundamentals_data=fundamentals_data, company_info=company_info
+        )
+        if not financing_data.get("success"):
+            financing_data = {
+                "success": False, "flags": [], "overhang_level": "Unknown",
+                "dilution": {"available": False}, "cash_runway": {"available": False},
+                "financing_filings": [],
+            }
+
         news_data = NewsAgent().run(ticker, company_info.get("company_name", ticker))
         if not news_data.get("success"):
             news_data = {"success": False, "articles": []}
@@ -155,6 +163,7 @@ def analyze(request: AnalyzeRequest):
             "news_data": news_data,
             "company_info": company_info,
             "macro_data": macro_data,
+            "financing_data": financing_data,
         }
         risk_data = RiskAgent().run(ticker, all_analysis_data)
         if not risk_data.get("success"):
@@ -174,6 +183,7 @@ def analyze(request: AnalyzeRequest):
             "news_data": news_data,
             "macro_data": macro_data,
             "peer_data": peer_data,
+            "financing_data": financing_data,
             "risk_data": risk_data,
             "memo_data": memo_data,
         })
