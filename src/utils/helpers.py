@@ -24,13 +24,3 @@ def validate_ticker(ticker: str) -> bool:
     # Tickers are 1-5 uppercase letters
     pattern = r"^[A-Z]{1,5}$"
     return bool(re.match(pattern, ticker.strip()))
-
-
-def format_currency(value: float) -> str:
-    """Format number as currency"""
-    return f"${value:,.2f}"
-
-
-def format_percentage(value: float) -> str:
-    """Format number as percentage"""
-    return f"{value:.2%}"

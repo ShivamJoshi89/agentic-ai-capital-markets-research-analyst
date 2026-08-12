@@ -101,7 +101,7 @@ class NewsClient:
         negative_keywords = [
             "bearish", "plunge", "crash", "fall", "decline", "loss", "miss",
             "weakness", "weak", "drop", "cut", "downgrade", "sell", "negative",
-            "concern", "risk", "slump", "volatile", "loss", "down"
+            "concern", "risk", "slump", "volatile", "down"
         ]
         
         positive_count = sum(1 for word in positive_keywords if word in text_lower)

@@ -12,7 +12,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from data_sources.news_client import NewsClient
-from analytics.sentiment_analysis import SentimentAnalysis
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +32,6 @@ class NewsAgent:
         """Initialize the News Agent"""
         self.name = "News Agent"
         self.news_client = NewsClient()
-        self.sentiment = SentimentAnalysis()
         logger.info(f"{self.name} initialized")
     
     def run(self, ticker: str, company_name: str) -> Dict[str, Any]:
