@@ -1,19 +1,13 @@
 # Agentic AI Capital Markets Research Analyst
 
-A multi-agent AI system that automates equity research by analyzing stock prices, company fundamentals, SEC filings, news sentiment, and macroeconomic indicators to generate analyst-style investment research memos.
-
-## Project Status
-
-**Phase 1: Project Skeleton** ✅
-
-Current development status: Building core infrastructure and agent framework.
+A multi-agent AI system that automates equity research by analyzing stock prices, company fundamentals, financing/dilution risk, news sentiment, peer valuation, and macroeconomic indicators to generate analyst-style investment research memos.
 
 ## Quick Start
 
 ### Prerequisites
 - Python 3.9 or higher
-- OpenAI API key (or Claude API key)
-- Windows, Mac, or Linux
+- Node.js 18+ (for the frontend)
+- OpenAI API key
 
 ### Installation
 
@@ -41,159 +35,151 @@ Current development status: Building core infrastructure and agent framework.
    # Edit .env and add your API keys
 ```
 
-5. **Run the app:**
+5. **Run the backend API (port 8000):**
 ```bash
-   streamlit run app.py
+   python api.py
 ```
 
-The dashboard will open at `http://localhost:8501`
+6. **Run the frontend (port 3000), in a separate terminal:**
+```bash
+   cd frontend
+   npm install
+   npm run dev
+```
+
+The app will open at `http://localhost:3000`.
 
 ## Features
 
-### MVP (In Development)
 - ✅ Ticker input
 - ✅ yfinance stock data integration
 - ✅ Company overview
 - ✅ Historical price charts
-- ✅ Return calculations (1M, 3M, 6M)
+- ✅ Return calculations (1M, 3M, 6M, YTD)
 - ✅ Volatility & moving averages
 - ✅ Maximum drawdown
 - ✅ Financial fundamentals
-- ✅ Recent news collection
+- ✅ Recent news collection & sentiment
+- ✅ Peer comparison & relative valuation
+- ✅ Financing & dilution risk (SEC EDGAR)
+- ✅ Live macroeconomic data (FRED)
 - ✅ Risk analysis
 - ✅ AI-generated research memo
-- ✅ Streamlit dashboard
+- ✅ PDF export of the research memo (client-side, via jsPDF)
 
-### Good-to-Have
-- 🔄 SEC EDGAR integration
-- 🔄 FRED macroeconomic data
-- 🔄 Source citations
-- 🔄 Confidence scoring
-- 🔄 PDF export
+### Why a Financing & Dilution Risk Agent
+
+Most retail-facing stock tools focus on P/E ratios and technicals. For
+small/micro-cap issuers, an equally important signal lives in the SEC filing
+index and the share count itself: shelf registrations, at-the-market (ATM)
+programs, and committed equity lines ("common stock purchase agreements")
+that dilute holders regardless of operating performance. This module tracks
+trailing share-count growth, estimates cash runway from operating burn, and
+flags recent financing-related filings, rolling all three into a single
+overhang score.
 
 ## Project Structure
 
 agentic-ai-capital-markets-research-analyst/
-├── app.py                          # Streamlit main application
-├── requirements.txt                # Project dependencies
+├── api.py                          # FastAPI backend - exposes the agent pipeline as REST endpoints
+├── requirements.txt                # Python dependencies
 ├── .env.example                    # Example environment variables
 ├── .gitignore                      # Git ignore rules
 ├── README.md                       # This file
 │
-├── data/                           # Data storage
-│   ├── raw/                        # Raw data from APIs
-│   │   ├── stock_prices/
-│   │   ├── fundamentals/
-│   │   ├── news/
-│   │   └── macro/
-│   ├── processed/                  # Processed data
-│   │   ├── market_metrics/
-│   │   ├── financial_ratios/
-│   │   └── research_inputs/
-│   └── reports/                    # Generated reports
-│       └── generated_memos/
-│
-├── src/                            # Source code
+├── src/                            # Python source (agent pipeline)
 │   ├── agents/                     # AI agents
-│   │   ├── init.py
+│   │   ├── __init__.py
 │   │   ├── market_data_agent.py
 │   │   ├── fundamentals_agent.py
-│   │   ├── sec_filing_agent.py
+│   │   ├── financing_risk_agent.py
 │   │   ├── news_agent.py
 │   │   ├── macro_agent.py
+│   │   ├── peer_agent.py
 │   │   ├── risk_agent.py
-│   │   ├── report_agent.py
-│   │   └── critic_agent.py
+│   │   └── report_agent.py
 │   │
 │   ├── data_sources/               # Data source integrations
-│   │   ├── init.py
+│   │   ├── __init__.py
 │   │   ├── yfinance_client.py
 │   │   ├── sec_edgar_client.py
 │   │   ├── news_client.py
 │   │   └── fred_client.py
 │   │
 │   ├── analytics/                  # Financial calculations
-│   │   ├── init.py
+│   │   ├── __init__.py
 │   │   ├── technical_indicators.py
 │   │   ├── financial_ratios.py
-│   │   ├── risk_metrics.py
-│   │   └── sentiment_analysis.py
+│   │   └── risk_metrics.py
 │   │
 │   ├── prompts/                    # LLM prompts
-│   │   ├── research_memo_prompt.txt
-│   │   ├── news_summary_prompt.txt
-│   │   ├── risk_analysis_prompt.txt
-│   │   ├── macro_summary_prompt.txt
-│   │   └── critic_prompt.txt
-│   │
-│   ├── reports/                    # Report generation
-│   │   ├── init.py
-│   │   ├── memo_template.py
-│   │   └── export_report.py
+│   │   └── research_memo_prompt.txt
 │   │
 │   └── utils/                      # Utilities
-│       ├── init.py
+│       ├── __init__.py
 │       ├── config.py
 │       ├── helpers.py
 │       └── logger.py
 │
-├── notebooks/                      # Jupyter notebooks
-│   ├── 01_market_data_exploration.ipynb
-│   ├── 02_fundamentals_exploration.ipynb
-│   └── 03_news_sentiment_exploration.ipynb
-│
-├── outputs/                        # Generated outputs
-│   ├── sample_memos/
-│   ├── charts/
-│   └── screenshots/
+├── frontend/                        # React + Vite frontend (the only UI)
+│   └── src/
+│       ├── pages/
+│       │   ├── Home.jsx             # Ticker search / landing page
+│       │   └── Dashboard.jsx        # Sidebar + page-switching shell
+│       ├── components/
+│       │   ├── pages/                # Dashboard sub-pages
+│       │   │   ├── Overview.jsx
+│       │   │   ├── MarketPerformance.jsx
+│       │   │   ├── Fundamentals.jsx
+│       │   │   ├── PeerComparison.jsx
+│       │   │   ├── NewsSentiment.jsx
+│       │   │   ├── MacroEnvironment.jsx
+│       │   │   ├── RiskAnalysis.jsx
+│       │   │   ├── ResearchMemo.jsx
+│       │   │   └── About.jsx
+│       │   ├── AnimatedNumber.jsx
+│       │   ├── MetricCard.jsx
+│       │   ├── PriceChart.jsx
+│       │   └── LoadingPipeline.jsx
+│       ├── api/client.js            # Fetch wrapper for the FastAPI backend
+│       ├── hooks/useCountUp.js
+│       └── utils/format.js
 │
 └── tests/                          # Unit tests
-├── test_market_data_agent.py
-├── test_risk_metrics.py
-└── test_financial_ratios.py
+    └── test_financing_risk_agent.py
 
 ## Technology Stack
 
-- **Language:** Python 3.9+
-- **Web Framework:** Streamlit
+- **Backend Language:** Python 3.9+
+- **API Framework:** FastAPI
+- **Frontend:** React + Vite, Tailwind CSS, Framer Motion
 - **Data Processing:** Pandas, NumPy
-- **Visualization:** Plotly, Matplotlib
 - **Financial Data:** yfinance
 - **LLM Integration:** OpenAI API
 - **News Parsing:** feedparser, BeautifulSoup4
+- **PDF Export:** jsPDF (client-side)
 - **Testing:** pytest
 
 ## Core Agents
 
-1. **Market Data Agent** - Stock prices, returns, volatility
-2. **Financial Fundamentals Agent** - Company financials and ratios
-3. **SEC Filing Agent** - Official SEC data
-4. **News Agent** - Recent news and sentiment
-5. **Macro Agent** - Economic indicators
-6. **Risk Agent** - Key risk identification
-7. **Report Generation Agent** - Investment memo creation
-8. **Critic/Validation Agent** - Output quality review
+The agents run in this order for each analysis (see `api.py`):
+
+1. **Market Data Agent** - Stock prices, returns, volatility, moving averages, drawdown
+2. **Fundamentals Agent** - Income statement, balance sheet, profitability, valuation ratios
+3. **Financing & Dilution Risk Agent** - SEC EDGAR-based dilution tracking, cash runway estimation, and financing-filing detection
+4. **News Agent** - Recent news and keyword-based sentiment classification
+5. **Macro Agent** - Fed funds rate, treasury yields, CPI inflation, unemployment, VIX (from FRED)
+6. **Peer Comparison Agent** - Comparable-company selection and relative valuation
+7. **Risk Agent** - Consolidates valuation, leverage, market, macro, sentiment, and sector risks
+8. **Report Generation Agent** - Synthesizes all of the above into a narrative investment memo
 
 ## Data Sources
 
 - **yfinance:** Stock prices, company info, financials
-- **SEC EDGAR API:** Official filing data
-- **NewsAPI / RSS:** Company news
+- **SEC EDGAR API:** Ticker-to-CIK resolution, shares-outstanding history, and recent filings. No API key required, but a descriptive User-Agent is mandatory per SEC's fair-access policy.
+- **Google News RSS:** Company news headlines (via `feedparser`)
 - **FRED API:** Macroeconomic indicators
-
-## Development Status
-
-- Phase 1: ✅ Project skeleton and setup
-- Phase 2: 🔄 Core agents and data pipeline
-- Phase 3: 🔄 LLM integration and memo generation
-- Phase 4: 🔄 Dashboard UI and refinement
-- Phase 5: 🔄 Testing, documentation, deployment
-
-## Roadmap
-
-**Week 1:** Project setup, market data agent, fundamentals agent
-**Week 2:** News agent, macro agent, risk agent
-**Week 3:** Report generation, dashboard, testing, demo
+- **OpenAI API:** Research memo generation
 
 ## Resume Bullet Points
 
@@ -212,10 +198,10 @@ MIT License - see LICENSE file for details
 
 ## Contact
 
-Shivam Joshi - joshishivam047@gmail.com 
+Shivam Joshi - joshishivam047@gmail.com
+
 ## Acknowledgments
 
 - yfinance for financial data
-- Streamlit for dashboard framework
 - OpenAI for LLM capabilities
 - Financial research best practices from investment institutions
