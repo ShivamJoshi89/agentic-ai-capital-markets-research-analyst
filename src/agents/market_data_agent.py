@@ -88,17 +88,47 @@ class MarketDataAgent:
             # Get latest price
             latest_price = history["Close"].iloc[-1]
             previous_price = history["Close"].iloc[-2]
-            
-            # Calculate returns
-            one_month_ago = len(history) - 21  # ~21 trading days
-            three_months_ago = len(history) - 63  # ~63 trading days
-            six_months_ago = len(history) - 126  # ~126 trading days
-            
-            one_month_return = (latest_price / history["Close"].iloc[max(0, one_month_ago)] - 1) * 100
-            three_month_return = (latest_price / history["Close"].iloc[max(0, three_months_ago)] - 1) * 100
-            six_month_return = (latest_price / history["Close"].iloc[max(0, six_months_ago)] - 1) * 100
-            ytd_return = (latest_price / history["Close"].iloc[0] - 1) * 100
-            
+
+            # Windowed trailing returns. Each window needs strictly more than
+            # `window` rows of history behind the latest bar; a shorter series
+            # (e.g. a recent IPO) returns None rather than silently borrowing
+            # history.iloc[0] under every window's label - previously all of
+            # 1M/3M/6M collapsed to the same full-history figure whenever the
+            # window exceeded the available history. None matches the MA/
+            # max_drawdown N/A convention already used below.
+            def windowed_return(window_days: int) -> Optional[float]:
+                if len(history) <= window_days:
+                    return None
+                base_price = history["Close"].iloc[len(history) - window_days]
+                return (latest_price / base_price - 1) * 100
+
+            one_month_return = windowed_return(21)    # ~21 trading days
+            three_month_return = windowed_return(63)  # ~63 trading days
+            six_month_return = windowed_return(126)   # ~126 trading days
+
+            # Calendar year-to-date: base off the first trading bar of the
+            # latest bar's calendar year, NOT history.iloc[0]. Against the
+            # rolling period="1y" fetch this method is called with,
+            # history.iloc[0] is ~12 months back, so the old
+            # latest/iloc[0] - 1 was a trailing-twelve-month return
+            # mislabeled as "YTD" (confirmed: on a series spanning a year
+            # boundary the two differed by tens of percentage points).
+            # Anchored to the latest bar's calendar year (not wall-clock
+            # today) so a stale or backtest series still yields a coherent
+            # YTD. In early January, before a second current-year bar
+            # exists, it falls back to the full trailing series and labels
+            # that explicitly via ytd_basis so a consumer never presents a
+            # since-inception figure as calendar-YTD.
+            latest_year = history.index[-1].year
+            ytd_rows = history[history.index.year == latest_year]
+            if len(ytd_rows) >= 2:
+                ytd_base_price = ytd_rows["Close"].iloc[0]
+                ytd_basis = "calendar_ytd"
+            else:
+                ytd_base_price = history["Close"].iloc[0]
+                ytd_basis = "trailing_since_series_start"
+            ytd_return = (latest_price / ytd_base_price - 1) * 100
+
             # Calculate daily returns
             daily_returns = history["Close"].pct_change()
             
@@ -121,10 +151,15 @@ class MarketDataAgent:
                 "previous_price": round(previous_price, 2),
                 "price_change": round(latest_price - previous_price, 2),
                 "price_change_pct": round((latest_price / previous_price - 1) * 100, 2),
-                "one_month_return": round(one_month_return, 2),
-                "three_month_return": round(three_month_return, 2),
-                "six_month_return": round(six_month_return, 2),
+                "one_month_return": round(one_month_return, 2) if one_month_return is not None else None,
+                "three_month_return": round(three_month_return, 2) if three_month_return is not None else None,
+                "six_month_return": round(six_month_return, 2) if six_month_return is not None else None,
                 "ytd_return": round(ytd_return, 2),
+                # "calendar_ytd" (base = first bar of the current calendar
+                # year) or "trailing_since_series_start" (early-January
+                # fallback - no current-year bar yet, so this is a trailing
+                # figure and must not be presented as YTD).
+                "ytd_basis": ytd_basis,
                 "volatility": round(volatility * 100, 2) if volatility else None,
                 "ma_20": round(ma_20.iloc[-1], 2) if not pd.isna(ma_20.iloc[-1]) else None,
                 "ma_50": round(ma_50.iloc[-1], 2) if not pd.isna(ma_50.iloc[-1]) else None,

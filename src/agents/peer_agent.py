@@ -19,6 +19,8 @@ import yfinance as yf
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from data_sources.yfinance_client import YFinanceClient
+
 logger = logging.getLogger(__name__)
 
 # Sector -> SPDR sector ETF. This is a fixed taxonomy mapping (11 sectors to
@@ -401,4 +403,10 @@ class PeerComparisonAgent:
             "roe": as_percent(info.get("returnOnEquity")),
             # yfinance debtToEquity is already scaled (e.g. 96.5 = 0.97x equity)
             "debt_to_equity": as_number(info.get("debtToEquity")),
+            # Per-peer TTM cutoff (the quarter each company's trailing metrics
+            # are aligned to). Peers on different fiscal calendars can be
+            # months apart, so this is surfaced per row rather than presenting
+            # every "TTM" figure as if it were the same date. None when
+            # yfinance doesn't report it for a given company.
+            "period_end": YFinanceClient._epoch_to_date(info.get("mostRecentQuarter")),
         }

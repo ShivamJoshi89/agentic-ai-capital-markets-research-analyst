@@ -79,6 +79,15 @@ SPECIAL_SITUATION_PATTERNS = [
         "keywords": ["buyback", "share repurchase", "repurchase program",
                      "repurchase plan", "repurchase authorization"],
     },
+    {
+        "category": "Dilutive Financing",
+        "signal_type": "risk_signal",
+        "keywords": ["common stock purchase agreement", "equity line of credit",
+                     "committed equity facility", "at-the-market offering",
+                     "atm offering", "shelf registration", "registered direct offering",
+                     "convertible note financing", "dilutive financing",
+                     "stock purchase agreement", "private placement"],
+    },
 ]
 
 
@@ -90,6 +99,7 @@ class RiskAgent:
     - Identify company-specific risks from fundamentals
     - Identify market and valuation risks
     - Identify macro risks with company context
+    - Fold in financing/dilution overhang flags from the Financing Risk Agent
     - Explain risk severity and impact
     """
     
@@ -118,7 +128,8 @@ class RiskAgent:
             news_data = analysis_data.get("news_data", {})
             company_info = analysis_data.get("company_info", {})
             macro_data = analysis_data.get("macro_data", {})
-            
+            financing_data = analysis_data.get("financing_data", {})
+
             # Identify risks with better analysis
             risks = self._identify_risks(
                 ticker,
@@ -128,7 +139,8 @@ class RiskAgent:
                 company_info,
                 macro_data
             )
-            
+            risks.extend(financing_data.get("flags", []))
+
             # Score and rank risks
             ranked_risks = self._rank_risks(risks)
             
@@ -203,12 +215,22 @@ class RiskAgent:
         # ========== VALUATION RISKS ==========
         if fundamentals.get("fundamentals"):
             fund = fundamentals.get("fundamentals", {})
-            
+
+            # REITs report GAAP net income that is structurally depressed by
+            # large non-cash real-estate depreciation, so their GAAP P/E reads
+            # far more "expensive" than the FFO/AFFO multiples the sector is
+            # actually valued on. Applying the generic >20x premium-valuation
+            # flag to a REIT would fire on almost every REIT purely as an
+            # artifact of GAAP depreciation, so the P/E-based flag is
+            # suppressed here (this pipeline doesn't compute FFO/AFFO; the UI
+            # surfaces that caveat for the sector instead).
+            is_reit = bool(fund.get("is_reit")) or company_info.get("sector") == "Real Estate"
+
             # High P/E ratio
             pe_str = str(fund.get("pe_ratio", "N/A")).replace("x", "").replace(",", "")
             try:
                 pe = float(pe_str)
-                if pe > 20:
+                if pe > 20 and not is_reit:
                     risks.append({
                         "title": "Premium Valuation Multiple",
                         "category": "Valuation",
@@ -239,7 +261,23 @@ class RiskAgent:
         # ========== LEVERAGE & SOLVENCY RISKS ==========
         if fundamentals.get("fundamentals"):
             fund = fundamentals.get("fundamentals", {})
-            
+
+            # Negative shareholders' equity is a distinct, more serious
+            # condition than "high leverage" - checked separately (and
+            # first) because debt_to_equity renders as a non-numeric
+            # "N/A (negative equity)" string in this case, which the
+            # High Financial Leverage check below can't parse as a number
+            # and would otherwise silently skip via its bare except.
+            if fund.get("negative_equity"):
+                risks.append({
+                    "title": "Negative Shareholders' Equity",
+                    "category": "Leverage",
+                    "severity": "High",
+                    "description": "Total liabilities exceed total assets, giving the company negative book equity. This typically results from sustained leveraged buybacks or accumulated losses funded by debt, and leaves no equity cushion to absorb further losses. Debt-to-Equity and Price-to-Book are not meaningful ratios in this state and are shown as N/A rather than a signed multiple.",
+                    "metric": "Negative book equity",
+                    "impact": "Reduced financial flexibility and no equity buffer against a downturn or credit tightening"
+                })
+
             # High debt
             debt_str = str(fund.get("debt_to_equity", "N/A")).replace("x", "").replace(",", "")
             try:
@@ -269,11 +307,25 @@ class RiskAgent:
         if fundamentals.get("fundamentals"):
             fund = fundamentals.get("fundamentals", {})
             
-            # Low or negative margins
+            # Low or negative margins. Severity scales with magnitude: a
+            # company losing multiples of its revenue (deeply negative margin)
+            # is a materially different risk from one with merely thin
+            # positive margins, and collapsing both into one Medium "Thin
+            # Profit Margins" bucket understated the former. A large operating
+            # loss gets its own High-severity flag and language.
             pm_str = str(fund.get("profit_margin", "N/A")).replace("%", "").replace(",", "")
             try:
                 pm = float(pm_str)
-                if pm < 5:
+                if pm < -25:
+                    risks.append({
+                        "title": "Substantial Operating Losses",
+                        "category": "Profitability",
+                        "severity": "High",
+                        "description": f"Profit margin of {pm:.1f}% means the company is losing a large fraction of - potentially multiples of - its revenue. Losses of this scale burn cash and typically force external financing (often dilutive) or deep cost cuts to continue operating. This is a going-concern-adjacent signal, not merely thin profitability.",
+                        "metric": f"{pm:.1f}%",
+                        "impact": "Sustained losses at this scale pressure liquidity and raise the likelihood of a dilutive raise"
+                    })
+                elif pm < 5:
                     risks.append({
                         "title": "Thin Profit Margins",
                         "category": "Profitability",
@@ -316,39 +368,52 @@ class RiskAgent:
         # ========== MACRO & INTEREST RATE RISKS ==========
         if macro_data.get("success"):
             indicators = macro_data.get("indicators", {})
-            
+
             # Interest rate environment
-            fed_rate = str(indicators.get("fed_rate", ""))
-            if "5" in fed_rate or ("4" in fed_rate and "75" in fed_rate):
-                risks.append({
-                    "title": "Interest Rate Vulnerability",
-                    "category": "Macro",
-                    "severity": "High",
-                    "description": f"Federal funds rate at elevated levels ({fed_rate}). High rate environment pressures valuations through higher discount rates. Impacts borrowing costs and consumer spending. Extended high-rate regime could slow economic growth.",
-                    "metric": fed_rate,
-                    "impact": "Could result in 10-20% valuation compression if rates persist"
-                })
-            elif "4" in fed_rate:
-                risks.append({
-                    "title": "Persistent Higher Rates",
-                    "category": "Macro",
-                    "severity": "Medium",
-                    "description": f"Rates remain elevated at {fed_rate}. This is constraining for growth stocks and companies with debt. Any attempts to raise rates further could be damaging.",
-                    "metric": fed_rate,
-                    "impact": "Additional rate hikes would negatively pressure valuations"
-                })
-            
+            fed_rate_value = indicators.get("fed_rate_value")
+            fed_rate_label = indicators.get("fed_rate", "N/A")
+            if fed_rate_value is not None:
+                if fed_rate_value >= 5.0:
+                    risks.append({
+                        "title": "Interest Rate Vulnerability",
+                        "category": "Macro",
+                        "severity": "High",
+                        "description": f"Federal funds rate at elevated levels ({fed_rate_label}). High rate environment pressures valuations through higher discount rates. Impacts borrowing costs and consumer spending. Extended high-rate regime could slow economic growth.",
+                        "metric": fed_rate_label,
+                        "impact": "Could result in 10-20% valuation compression if rates persist"
+                    })
+                elif fed_rate_value >= 4.0:
+                    risks.append({
+                        "title": "Persistent Higher Rates",
+                        "category": "Macro",
+                        "severity": "Medium",
+                        "description": f"Rates remain elevated at {fed_rate_label}. This is constraining for growth stocks and companies with debt. Any attempts to raise rates further could be damaging.",
+                        "metric": fed_rate_label,
+                        "impact": "Additional rate hikes would negatively pressure valuations"
+                    })
+
             # Inflation
-            inflation = str(indicators.get("cpi_inflation", ""))
-            if "3" in inflation or "4" in inflation:
-                risks.append({
-                    "title": "Inflation & Margin Pressure",
-                    "category": "Macro",
-                    "severity": "Medium",
-                    "description": f"Inflation at {inflation} remains sticky. Creates headwinds for labor costs and input prices. Companies with weak pricing power will face margin compression. May prompt additional rate hikes.",
-                    "metric": inflation,
-                    "impact": "Could pressure profit margins by 50-100bps"
-                })
+            cpi_value = indicators.get("cpi_inflation_value")
+            cpi_label = indicators.get("cpi_inflation", "N/A")
+            if cpi_value is not None:
+                if cpi_value >= 5.0:
+                    risks.append({
+                        "title": "Elevated Inflation",
+                        "category": "Macro",
+                        "severity": "High",
+                        "description": f"Inflation at {cpi_label} is running well above the Fed's target. Creates significant headwinds for labor costs and input prices, and raises the likelihood of continued rate pressure. Companies with weak pricing power face material margin compression.",
+                        "metric": cpi_label,
+                        "impact": "Could pressure profit margins materially and keep rates higher for longer"
+                    })
+                elif cpi_value >= 3.0:
+                    risks.append({
+                        "title": "Inflation & Margin Pressure",
+                        "category": "Macro",
+                        "severity": "Medium",
+                        "description": f"Inflation at {cpi_label} remains above target. Creates headwinds for labor costs and input prices. Companies with weak pricing power will face margin compression. May prompt additional rate hikes.",
+                        "metric": cpi_label,
+                        "impact": "Could pressure profit margins by 50-100bps"
+                    })
         
         # ========== NEWS & SENTIMENT RISKS ==========
         if news_data.get("success"):
@@ -445,7 +510,7 @@ class RiskAgent:
             key=lambda x: severity_order.get(x.get("severity", "Low"), 2)
         )
         
-        return sorted_risks[:8]  # Return top 8 risks
+        return sorted_risks[:10]  # Return top 10 risks
     
     def _generate_risk_summary(self, risks: List[Dict[str, Any]]) -> str:
         """Generate comprehensive risk summary"""
