@@ -157,10 +157,12 @@ input each memo was given:
   produced unsupported claims (e.g. "consistent revenue growth" with no growth
   data) and referenced a debt-to-equity ratio that was actually N/A.
 - **Quality:** materially more detailed, better-hedged, more sector-aware prose.
-- **Cost:** ~**$0.006** per memo at standard rates (~**$0.003** with the Batch
-  API, which applies since memo generation is not real-time) vs ~$0.002 / ~$0.001
-  for `gpt-3.5-turbo`. The ~3× multiple is a few tenths of a cent per memo —
-  immaterial for this tool — so the more faithful model was chosen.
+- **Cost:** ~**$0.006** per memo at standard rates vs ~$0.002 for
+  `gpt-3.5-turbo`. (The Batch API's ~50%-off rate does *not* apply: the public
+  `/api/analyze` endpoint is synchronous and a user waits on it, so it's
+  real-time, billed at the standard rate.) The ~3× multiple is a few tenths of
+  a cent per memo — immaterial for this tool — so the more faithful model was
+  chosen.
 - **Latency:** ~20–25s per memo vs ~5–8s for the old model. Acceptable for a
   one-memo-per-analysis workflow, but noticeably slower.
 
