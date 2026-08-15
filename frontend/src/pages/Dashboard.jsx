@@ -247,6 +247,12 @@ export default function Dashboard({ data, onReset, onChangeTicker, error, busy }
             </motion.div>
           </AnimatePresence>
         </main>
+
+        <footer className="shrink-0 border-t border-navy-600 bg-navy-800 px-6 py-2 text-center text-[11px] leading-relaxed text-gray-500">
+          Research &amp; educational demo — <span className="text-gray-400">not investment advice</span> and not a
+          commercial data product. Figures come from yfinance / FRED / SEC EDGAR and may be delayed, incomplete, or
+          inaccurate; verify against primary filings before relying on them.
+        </footer>
       </div>
     </motion.div>
   );
