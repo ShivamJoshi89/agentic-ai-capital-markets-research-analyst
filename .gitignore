@@ -28,13 +28,16 @@ __pycache__/
 data/raw/*
 data/processed/*
 outputs/*
-*.csv
-*.json
+# Data-output CSV/JSON only - scoped to the data/output dirs so config JSON
+# elsewhere (e.g. frontend/vercel.json) isn't silently ignored.
+data/**/*.csv
+data/**/*.json
+outputs/**/*.csv
+outputs/**/*.json
 logs/*
 
-# *.json above is for data outputs - frontend package manifests must be tracked
-!frontend/package.json
-!frontend/package-lock.json
+# Local agent state (previously hidden only by the blanket *.json rule)
+.claude/
 
 # Testing
 .pytest_cache/
