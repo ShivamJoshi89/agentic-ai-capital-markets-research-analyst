@@ -3,6 +3,8 @@ yfinance client for fetching stock market data
 """
 
 import logging
+import os
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Tuple
@@ -28,11 +30,42 @@ class YFinanceClient:
     RATE_LIMIT_MAX_RETRIES = 3
     RATE_LIMIT_BASE_DELAY_SEC = 1.0
 
+    # Short-TTL result cache keyed by (method, ticker), shared across all
+    # instances. Under public traffic many users request the same popular
+    # tickers within minutes; caching the yfinance lookups avoids hammering
+    # Yahoo with duplicate requests (which is what gets a shared deployment IP
+    # rate-limited/blocked), on top of the retry logic above. This is not about
+    # freshness - quarterly financials don't change minute-to-minute. Default
+    # 30 min, tunable via YF_CACHE_TTL_SEC; set to 0 to disable (e.g. tests).
+    CACHE_TTL_SEC = int(os.getenv("YF_CACHE_TTL_SEC", "1800"))
+    _cache: Dict[str, Tuple[float, Any]] = {}
+    _cache_lock = threading.Lock()
+
     def __init__(self):
         """Initialize YFinance client"""
         self.name = "YFinance Client"
         self.fred_client = FREDClient()
         logger.info(f"{self.name} initialized")
+
+    @classmethod
+    def _cache_get_or_fetch(cls, key: str, producer):
+        """Return the cached result for `key` if it's within CACHE_TTL_SEC,
+        otherwise call producer(), cache a non-None result, and return it. A
+        None result (no data) is never cached, so a transient miss isn't
+        pinned; exceptions (e.g. rate-limit) propagate uncached. TTL <= 0
+        disables caching entirely."""
+        if cls.CACHE_TTL_SEC <= 0:
+            return producer()
+        now = time.monotonic()
+        with cls._cache_lock:
+            entry = cls._cache.get(key)
+            if entry is not None and (now - entry[0]) < cls.CACHE_TTL_SEC:
+                return entry[1]
+        result = producer()  # fetch outside the lock (network I/O)
+        if result is not None:
+            with cls._cache_lock:
+                cls._cache[key] = (now, result)
+        return result
 
     @classmethod
     def _fetch_with_retry(cls, fn, what: str):
@@ -57,13 +90,19 @@ class YFinanceClient:
                 delay *= 2
     
     def get_stock_data(self, ticker: str, period: str = "1y") -> Optional[Dict[str, Any]]:
+        """Cached wrapper (short TTL) around the yfinance history fetch - see
+        _cache_get_or_fetch."""
+        return self._cache_get_or_fetch(
+            f"stock_data:{ticker}:{period}", lambda: self._fetch_stock_data(ticker, period))
+
+    def _fetch_stock_data(self, ticker: str, period: str = "1y") -> Optional[Dict[str, Any]]:
         """
         Fetch historical stock data.
-        
+
         Args:
             ticker: Stock ticker symbol
             period: Time period ('1y', '5y', etc.)
-        
+
         Returns:
             Dictionary with stock data or None if error
         """
@@ -98,12 +137,18 @@ class YFinanceClient:
             return None
     
     def get_company_info(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """Cached wrapper (short TTL) around the yfinance company-info fetch -
+        see _cache_get_or_fetch."""
+        return self._cache_get_or_fetch(
+            f"company_info:{ticker}", lambda: self._fetch_company_info(ticker))
+
+    def _fetch_company_info(self, ticker: str) -> Optional[Dict[str, Any]]:
         """
         Fetch company information.
-        
+
         Args:
             ticker: Stock ticker symbol
-        
+
         Returns:
             Dictionary with company info or None if error
         """
@@ -150,12 +195,18 @@ class YFinanceClient:
             return None
     
     def get_fundamentals(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """Cached wrapper (short TTL) around the fundamentals fetch - see
+        _cache_get_or_fetch."""
+        return self._cache_get_or_fetch(
+            f"fundamentals:{ticker}", lambda: self._fetch_fundamentals(ticker))
+
+    def _fetch_fundamentals(self, ticker: str) -> Optional[Dict[str, Any]]:
         """
         Fetch company fundamentals.
-        
+
         Args:
             ticker: Stock ticker symbol
-        
+
         Returns:
             Dictionary with financial data or None if error
         """
