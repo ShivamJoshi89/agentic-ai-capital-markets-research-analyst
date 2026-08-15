@@ -715,6 +715,7 @@ def test_roe_roa_are_fx_invariant_through_the_real_pipeline(monkeypatch):
     expected_roa_native = round(net_income_native / ((assets_q0 + assets_q4) / 2), 4)
 
     for fx_rate in (0.0063, 0.0091):  # two different rates - must not change the ratio
+        YFinanceClient._cache.clear()  # same ticker each iteration; don't serve the first from cache
         fake_ticker = make_fake_foreign_issuer(net_income_native, equity_q0, equity_q4, assets_q0, assets_q4)
         monkeypatch.setattr(yfinance_client_module.yf, "Ticker", lambda ticker: fake_ticker)
 
